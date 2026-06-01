@@ -1,0 +1,115 @@
+# fastkokoro
+
+Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
+
+`fastkokoro` is focused on running Kokoro without a Torch server. It uses
+`kokoro-onnx` for tokenization, phonemization, ONNX Runtime inference, and voice
+handling. The default model is NVIDIA's optimized ONNX export:
+`nvidia/kokoro-82M-onnx-opt`.
+
+The NVIDIA repo's `voices.bin` is not currently load-compatible with
+`kokoro-onnx`, so the first version uses the NVIDIA ONNX model with the
+community `voices-v1.0.bin` voice pack.
+
+## Install
+
+```bash
+uv sync
+```
+
+For GPU builds on platforms supported by `onnxruntime-gpu`:
+
+```bash
+uv sync --extra gpu
+```
+
+## Run
+
+```bash
+uv run fastkokoro
+```
+
+The server starts on `http://0.0.0.0:8880` by default.
+
+Docker CPU:
+
+```bash
+docker build -f Dockerfile.cpu -t fastkokoro:cpu .
+docker run -p 8880:8880 fastkokoro:cpu
+```
+
+Docker GPU:
+
+```bash
+docker build -f Dockerfile.gpu -t fastkokoro:gpu .
+docker run --gpus all -p 8880:8880 fastkokoro:gpu
+```
+
+Environment variables:
+
+| Variable | Default |
+| --- | --- |
+| `FASTKOKORO_HOST` | `0.0.0.0` |
+| `FASTKOKORO_PORT` | `8880` |
+| `FASTKOKORO_MODEL_REPO` | `nvidia/kokoro-82M-onnx-opt` |
+| `FASTKOKORO_MODEL_FILE` | `kokoro-82m-v1.0.onnx` |
+| `FASTKOKORO_MODEL_PATH` | unset; downloads from Hugging Face |
+| `FASTKOKORO_VOICES_PATH` | unset; downloads community voice pack |
+| `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
+| `FASTKOKORO_DEFAULT_LANG` | `en-us` |
+
+## API
+
+Health:
+
+```bash
+curl http://localhost:8880/health
+```
+
+Models:
+
+```bash
+curl http://localhost:8880/v1/models
+```
+
+Speech:
+
+```bash
+curl http://localhost:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "kokoro",
+    "input": "Hello from fastkokoro.",
+    "voice": "af_heart",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+Streaming PCM:
+
+```bash
+curl http://localhost:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "kokoro",
+    "input": "Streaming from fastkokoro.",
+    "voice": "af_heart",
+    "response_format": "pcm",
+    "stream": true
+  }' \
+  --output speech.pcm
+```
+
+## Python
+
+```python
+from fastkokoro import FastKokoro
+
+engine = FastKokoro()
+audio = engine.create(
+    "Hello from fastkokoro.",
+    voice="af_heart",
+    response_format="wav",
+)
+```
