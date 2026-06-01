@@ -6,10 +6,8 @@ from pathlib import Path
 
 DEFAULT_MODEL_REPO = "nvidia/kokoro-82M-onnx-opt"
 DEFAULT_MODEL_FILE = "kokoro-82m-v1.0.onnx"
-DEFAULT_VOICES_URL = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
-    "model-files-v1.0/voices-v1.0.bin"
-)
+DEFAULT_VOICES_FILE = "voices.bin"
+DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8880
@@ -20,7 +18,8 @@ SAMPLE_RATE = 24000
 class Settings:
     model_repo: str
     model_file: str
-    voices_url: str
+    voices_file: str
+    voices_index_file: str
     model_path: Path | None
     voices_path: Path | None
     cache_dir: Path
@@ -38,7 +37,10 @@ class Settings:
         return cls(
             model_repo=os.getenv("FASTKOKORO_MODEL_REPO", DEFAULT_MODEL_REPO),
             model_file=os.getenv("FASTKOKORO_MODEL_FILE", DEFAULT_MODEL_FILE),
-            voices_url=os.getenv("FASTKOKORO_VOICES_URL", DEFAULT_VOICES_URL),
+            voices_file=os.getenv("FASTKOKORO_VOICES_FILE", DEFAULT_VOICES_FILE),
+            voices_index_file=os.getenv(
+                "FASTKOKORO_VOICES_INDEX_FILE", DEFAULT_VOICES_INDEX_FILE
+            ),
             model_path=Path(model_path).expanduser() if model_path else None,
             voices_path=Path(voices_path).expanduser() if voices_path else None,
             cache_dir=Path(cache_dir or "~/.cache/fastkokoro").expanduser(),

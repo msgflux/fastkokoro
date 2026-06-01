@@ -7,9 +7,9 @@ Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
 handling. The default model is NVIDIA's optimized ONNX export:
 `nvidia/kokoro-82M-onnx-opt`.
 
-The NVIDIA repo's `voices.bin` is not currently load-compatible with
-`kokoro-onnx`, so the first version uses the NVIDIA ONNX model with the
-community `voices-v1.0.bin` voice pack.
+The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
+once into the `.npz` voice format expected by `kokoro-onnx`, so the default model
+and voices both come from `nvidia/kokoro-82M-onnx-opt`.
 
 ## Install
 
@@ -54,7 +54,9 @@ Environment variables:
 | `FASTKOKORO_MODEL_REPO` | `nvidia/kokoro-82M-onnx-opt` |
 | `FASTKOKORO_MODEL_FILE` | `kokoro-82m-v1.0.onnx` |
 | `FASTKOKORO_MODEL_PATH` | unset; downloads from Hugging Face |
-| `FASTKOKORO_VOICES_PATH` | unset; downloads community voice pack |
+| `FASTKOKORO_VOICES_FILE` | `voices.bin` |
+| `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
+| `FASTKOKORO_VOICES_PATH` | unset; downloads and converts NVIDIA voices |
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 
