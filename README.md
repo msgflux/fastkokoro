@@ -59,6 +59,43 @@ Environment variables:
 | `FASTKOKORO_VOICES_PATH` | unset; downloads and converts NVIDIA voices |
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
+| `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
+| `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
+| `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | unset |
+| `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | unset |
+
+## ONNX Runtime Providers
+
+`fastkokoro` creates the ONNX Runtime session directly, so provider selection is
+explicit and predictable.
+
+CPU:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro
+```
+
+CUDA with CPU fallback:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
+```
+
+TensorRT with CUDA and CPU fallback:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
+```
+
+Intel/OpenVINO builds can use:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=OpenVINOExecutionProvider,CPUExecutionProvider uv run fastkokoro
+```
+
+Set `FASTKOKORO_ONNX_AUTO_PROVIDERS=true` to pass every provider available in the
+installed ONNX Runtime build to the session. Use this mostly for quick local
+experiments; production deployments should pin an explicit provider order.
 
 ## API
 

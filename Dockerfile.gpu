@@ -11,7 +11,7 @@ RUN uv sync --frozen --no-dev --extra gpu
 
 ENV FASTKOKORO_HOST=0.0.0.0
 ENV FASTKOKORO_PORT=8880
-ENV ONNX_PROVIDER=CUDAExecutionProvider
+ENV FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider
 
 EXPOSE 8880
 

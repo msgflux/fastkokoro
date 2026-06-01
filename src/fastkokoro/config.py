@@ -11,6 +11,7 @@ DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8880
+DEFAULT_ONNX_PROVIDERS = ("CPUExecutionProvider",)
 SAMPLE_RATE = 24000
 
 
@@ -27,12 +28,17 @@ class Settings:
     default_lang: str
     host: str
     port: int
+    onnx_providers: tuple[str, ...]
+    onnx_auto_providers: bool
+    onnx_intra_op_num_threads: int | None
+    onnx_inter_op_num_threads: int | None
 
     @classmethod
     def from_env(cls) -> Settings:
         model_path = os.getenv("FASTKOKORO_MODEL_PATH")
         voices_path = os.getenv("FASTKOKORO_VOICES_PATH")
         cache_dir = os.getenv("FASTKOKORO_CACHE_DIR")
+        providers = os.getenv("FASTKOKORO_ONNX_PROVIDERS")
 
         return cls(
             model_repo=os.getenv("FASTKOKORO_MODEL_REPO", DEFAULT_MODEL_REPO),
@@ -48,4 +54,30 @@ class Settings:
             default_lang=os.getenv("FASTKOKORO_DEFAULT_LANG", "en-us"),
             host=os.getenv("FASTKOKORO_HOST", DEFAULT_HOST),
             port=int(os.getenv("FASTKOKORO_PORT", str(DEFAULT_PORT))),
+            onnx_providers=parse_csv(providers) or DEFAULT_ONNX_PROVIDERS,
+            onnx_auto_providers=parse_bool(os.getenv("FASTKOKORO_ONNX_AUTO_PROVIDERS")),
+            onnx_intra_op_num_threads=parse_optional_int(
+                os.getenv("FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS")
+            ),
+            onnx_inter_op_num_threads=parse_optional_int(
+                os.getenv("FASTKOKORO_ONNX_INTER_OP_NUM_THREADS")
+            ),
         )
+
+
+def parse_csv(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def parse_bool(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_optional_int(value: str | None) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+    return int(value)

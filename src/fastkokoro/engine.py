@@ -8,6 +8,7 @@ from kokoro_onnx import Kokoro
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
+from fastkokoro.onnx import create_session
 
 
 class FastKokoro:
@@ -15,7 +16,8 @@ class FastKokoro:
         self.settings = settings or Settings.from_env()
         self.model_path = resolve_model_path(self.settings)
         self.voices_path = resolve_voices_path(self.settings)
-        self.kokoro = Kokoro(str(self.model_path), str(self.voices_path))
+        self.session = create_session(self.model_path, self.settings)
+        self.kokoro = Kokoro.from_session(self.session, str(self.voices_path))
 
     def voices(self) -> list[str]:
         return self.kokoro.get_voices()
