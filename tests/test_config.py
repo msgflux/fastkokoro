@@ -2,6 +2,7 @@ from fastkokoro.config import (
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
     DEFAULT_ONNX_IO_BINDING,
+    DEFAULT_ONNX_IO_BINDING_DEVICE,
     Settings,
 )
 
@@ -15,6 +16,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_INTER_OP_NUM_THREADS", "2")
     monkeypatch.setenv("FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL", "extended")
     monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING", "false")
+    monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING_DEVICE", "cuda")
 
     settings = Settings.from_env()
 
@@ -26,6 +28,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_inter_op_num_threads == 2
     assert settings.onnx_graph_optimization_level == "extended"
     assert settings.onnx_io_binding is False
+    assert settings.onnx_io_binding_device == "cuda"
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -43,6 +46,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
         DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL
     )
     assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
+    assert settings.onnx_io_binding_device == DEFAULT_ONNX_IO_BINDING_DEVICE
 
 
 def test_settings_allows_ort_default_thread_options(monkeypatch):
@@ -93,3 +97,14 @@ def test_settings_rejects_invalid_graph_optimization_level(monkeypatch):
         assert "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL" in str(exc)
     else:
         raise AssertionError("expected invalid graph optimization level to fail")
+
+
+def test_settings_rejects_invalid_iobinding_device(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING_DEVICE", "invalid")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "FASTKOKORO_ONNX_IO_BINDING_DEVICE" in str(exc)
+    else:
+        raise AssertionError("expected invalid IOBinding device to fail")

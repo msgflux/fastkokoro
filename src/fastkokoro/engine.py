@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 import numpy as np
+import onnxruntime as ort
 from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro, trim_audio
 
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
@@ -193,10 +194,45 @@ class FastKokoro:
         return inputs
 
     def _run_onnx_audio_iobinding(self, inputs: dict[str, np.ndarray]) -> np.ndarray:
+        device = self._resolve_iobinding_device()
+        if device == "cuda":
+            try:
+                return self._run_onnx_audio_cuda_iobinding(inputs)
+            except RuntimeError:
+                logger.exception(
+                    "CUDA IOBinding failed; falling back to CPU IOBinding"
+                )
+                return self._run_onnx_audio_cpu_iobinding(inputs)
+        return self._run_onnx_audio_cpu_iobinding(inputs)
+
+    def _resolve_iobinding_device(self) -> str:
+        configured = self.settings.onnx_io_binding_device
+        if configured == "cpu":
+            return "cpu"
+        if configured == "cuda":
+            return "cuda"
+        if "CUDAExecutionProvider" in self.session.get_providers():
+            return "cuda"
+        return "cpu"
+
+    def _run_onnx_audio_cpu_iobinding(
+        self, inputs: dict[str, np.ndarray]
+    ) -> np.ndarray:
         binding = self.session.io_binding()
         for name, value in inputs.items():
             binding.bind_cpu_input(name, value)
         binding.bind_output(self._onnx_output_name)
+        self.session.run_with_iobinding(binding)
+        return binding.copy_outputs_to_cpu()[0]
+
+    def _run_onnx_audio_cuda_iobinding(
+        self, inputs: dict[str, np.ndarray]
+    ) -> np.ndarray:
+        binding = self.session.io_binding()
+        for name, value in inputs.items():
+            ortvalue = ort.OrtValue.ortvalue_from_numpy(value, "cuda", 0)
+            binding.bind_ortvalue_input(name, ortvalue)
+        binding.bind_output(self._onnx_output_name, device_type="cpu")
         self.session.run_with_iobinding(binding)
         return binding.copy_outputs_to_cpu()[0]
 

@@ -28,6 +28,7 @@ def _settings(**overrides):
         onnx_inter_op_num_threads=None,
         onnx_graph_optimization_level="all",
         onnx_io_binding=False,
+        onnx_io_binding_device="auto",
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -214,6 +215,83 @@ def test_create_can_run_with_iobinding():
     assert calls == [binding]
     assert set(binding.inputs) == {"tokens", "style", "speed"}
     assert binding.output_name == "audio"
+
+
+def test_create_can_bind_cuda_inputs(monkeypatch):
+    class FakeBinding:
+        def __init__(self):
+            self.inputs = {}
+            self.output = None
+
+        def bind_ortvalue_input(self, name, ortvalue):
+            self.inputs[name] = ortvalue
+
+        def bind_output(self, name, device_type="cpu", device_id=0):
+            self.output = (name, device_type, device_id)
+
+        def copy_outputs_to_cpu(self):
+            return [np.ones(48, dtype=np.float32)]
+
+    binding = FakeBinding()
+    ortvalues = []
+    engine = _engine(_settings(onnx_io_binding=True, onnx_io_binding_device="cuda"))
+
+    def make_ortvalue(value, device_type, device_id):
+        ortvalue = (value, device_type, device_id)
+        ortvalues.append(ortvalue)
+        return ortvalue
+
+    monkeypatch.setattr(
+        "fastkokoro.engine.ort.OrtValue.ortvalue_from_numpy",
+        make_ortvalue,
+    )
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        io_binding=lambda: binding,
+        run_with_iobinding=lambda value: None,
+    )
+
+    engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
+
+    assert set(binding.inputs) == {"tokens", "style", "speed"}
+    assert binding.output == ("audio", "cpu", 0)
+    assert {ortvalue[1] for ortvalue in ortvalues} == {"cuda"}
+
+
+def test_cuda_iobinding_falls_back_to_cpu(monkeypatch):
+    class FakeBinding:
+        def __init__(self):
+            self.cpu_inputs = {}
+            self.output_name = None
+
+        def bind_cpu_input(self, name, value):
+            self.cpu_inputs[name] = value
+
+        def bind_output(self, name, **kwargs):
+            self.output_name = name
+
+        def copy_outputs_to_cpu(self):
+            return [np.ones(48, dtype=np.float32)]
+
+    bindings = [FakeBinding(), FakeBinding()]
+    calls = []
+    engine = _engine(_settings(onnx_io_binding=True, onnx_io_binding_device="cuda"))
+    monkeypatch.setattr(
+        "fastkokoro.engine.ort.OrtValue.ortvalue_from_numpy",
+        lambda value, device_type, device_id: (_ for _ in ()).throw(
+            RuntimeError("cuda unavailable")
+        ),
+    )
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        io_binding=lambda: bindings.pop(0),
+        run_with_iobinding=lambda value: calls.append(value),
+    )
+
+    engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
+
+    assert len(calls) == 1
+    assert set(calls[0].cpu_inputs) == {"tokens", "style", "speed"}
 
 
 def test_split_phonemes_for_model_prefers_punctuation_boundaries():

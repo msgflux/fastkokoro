@@ -17,12 +17,14 @@ DEFAULT_ONNX_INTRA_OP_NUM_THREADS = min(4, os.cpu_count() or 1)
 DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
 DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL = "all"
 DEFAULT_ONNX_IO_BINDING = True
+DEFAULT_ONNX_IO_BINDING_DEVICE = "auto"
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 SAMPLE_RATE = 24000
 STREAM_STRATEGIES = {"kokoro", "phrase", "sentence"}
 ONNX_GRAPH_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
+ONNX_IO_BINDING_DEVICES = {"auto", "cpu", "cuda"}
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,7 @@ class Settings:
     onnx_inter_op_num_threads: int | None
     onnx_graph_optimization_level: str
     onnx_io_binding: bool
+    onnx_io_binding_device: str
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -93,6 +96,12 @@ class Settings:
             onnx_io_binding=parse_bool(
                 os.getenv("FASTKOKORO_ONNX_IO_BINDING"),
                 default=DEFAULT_ONNX_IO_BINDING,
+            ),
+            onnx_io_binding_device=parse_onnx_io_binding_device(
+                os.getenv(
+                    "FASTKOKORO_ONNX_IO_BINDING_DEVICE",
+                    DEFAULT_ONNX_IO_BINDING_DEVICE,
+                )
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
@@ -150,6 +159,17 @@ def parse_onnx_graph_optimization_level(value: str) -> str:
         choices = ", ".join(sorted(ONNX_GRAPH_OPTIMIZATION_LEVELS))
         raise ValueError(
             "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL must be one of: "
+            f"{choices}"
+        )
+    return parsed
+
+
+def parse_onnx_io_binding_device(value: str) -> str:
+    parsed = value.strip().lower()
+    if parsed not in ONNX_IO_BINDING_DEVICES:
+        choices = ", ".join(sorted(ONNX_IO_BINDING_DEVICES))
+        raise ValueError(
+            "FASTKOKORO_ONNX_IO_BINDING_DEVICE must be one of: "
             f"{choices}"
         )
     return parsed
