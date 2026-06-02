@@ -133,7 +133,9 @@ server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
 `FASTKOKORO_STREAM_STRATEGY=sentence` streams by synthesizing one sentence at a
-time. For `response_format=pcm`, the server also slices each sentence into
+time. Set `FASTKOKORO_STREAM_STRATEGY=phrase` for lower time to first chunk by
+splitting on phrase punctuation such as commas, semicolons, and question marks.
+For `response_format=pcm`, the server also slices each generated segment into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
 path directly.

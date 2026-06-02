@@ -93,6 +93,7 @@ async def main() -> None:
     runs = []
     for strategy, runner in (
         ("create_pcm", create_pcm),
+        ("stream_phrase", stream_phrase),
         ("stream_sentence", stream_sentence),
         ("stream_kokoro", stream_kokoro),
     ):
@@ -167,6 +168,24 @@ async def stream_sentence(
 ) -> AsyncGenerator[bytes, None]:
     original_strategy = engine.settings.stream_strategy
     engine.settings = replace(engine.settings, stream_strategy="sentence")
+    try:
+        async for chunk in engine.create_stream(
+            text,
+            voice=voice,
+            lang=lang,
+            speed=speed,
+            response_format="pcm",
+        ):
+            yield chunk
+    finally:
+        engine.settings = replace(engine.settings, stream_strategy=original_strategy)
+
+
+async def stream_phrase(
+    engine: FastKokoro, text: str, voice: str, lang: str, speed: float
+) -> AsyncGenerator[bytes, None]:
+    original_strategy = engine.settings.stream_strategy
+    engine.settings = replace(engine.settings, stream_strategy="phrase")
     try:
         async for chunk in engine.create_stream(
             text,

@@ -19,7 +19,7 @@ DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 SAMPLE_RATE = 24000
-STREAM_STRATEGIES = {"kokoro", "sentence"}
+STREAM_STRATEGIES = {"kokoro", "phrase", "sentence"}
 
 
 @dataclass(frozen=True)
