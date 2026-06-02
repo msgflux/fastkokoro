@@ -38,30 +38,41 @@ uv run fastkokoro
 
 The server starts on `http://0.0.0.0:8880` by default.
 
-Docker CPU:
+## Docker
+
+Use the published CPU image from Docker Hub:
+
+```bash
+docker run -p 8880:8880 msgflux/fastkokoro:cpu
+```
+
+Use the published GPU image with NVIDIA Container Toolkit:
+
+```bash
+docker run --gpus all -p 8880:8880 msgflux/fastkokoro:gpu
+```
+
+Published tags:
+
+| Tag | Description |
+| --- | --- |
+| `cpu`, `latest-cpu` | Latest CPU image |
+| `gpu`, `latest-gpu` | Latest GPU image |
+| `0.2.0-cpu`, `0.2-cpu` | Versioned CPU image |
+| `0.2.0-gpu`, `0.2-gpu` | Versioned GPU image |
+
+Build and run the CPU image locally:
 
 ```bash
 docker build -f Dockerfile.cpu -t fastkokoro:cpu .
 docker run -p 8880:8880 fastkokoro:cpu
 ```
 
-Docker Hub CPU:
-
-```bash
-docker run -p 8880:8880 msgflux/fastkokoro:cpu
-```
-
-Docker GPU:
+Build and run the GPU image locally:
 
 ```bash
 docker build -f Dockerfile.gpu -t fastkokoro:gpu .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu
-```
-
-Docker Hub GPU:
-
-```bash
-docker run --gpus all -p 8880:8880 msgflux/fastkokoro:gpu
 ```
 
 Environment variables:
