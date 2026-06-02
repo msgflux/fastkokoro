@@ -1,18 +1,42 @@
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+FROM ghcr.io/astral-sh/uv:latest AS uv
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 python3.12-venv ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
 RUN uv sync --frozen --no-dev --extra gpu
 
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS runtime
+
+ENV PATH="/app/.venv/bin:$PATH"
 ENV FASTKOKORO_HOST=0.0.0.0
 ENV FASTKOKORO_PORT=8880
+ENV FASTKOKORO_CACHE_DIR=/models
 ENV FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app /app
 
 EXPOSE 8880
+VOLUME ["/models"]
 
-CMD ["uv", "run", "--no-sync", "fastkokoro"]
+CMD ["fastkokoro"]

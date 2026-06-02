@@ -11,5 +11,6 @@ def main() -> None:
         "fastkokoro.server:app",
         host=settings.host,
         port=settings.port,
+        loop="auto",
         reload=False,
     )

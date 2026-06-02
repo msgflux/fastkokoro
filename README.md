@@ -17,6 +17,12 @@ and voices both come from `nvidia/kokoro-82M-onnx-opt`.
 uv sync
 ```
 
+From PyPI:
+
+```bash
+pip install fastkokoro
+```
+
 For GPU builds on platforms supported by `onnxruntime-gpu`:
 
 ```bash
@@ -38,11 +44,23 @@ docker build -f Dockerfile.cpu -t fastkokoro:cpu .
 docker run -p 8880:8880 fastkokoro:cpu
 ```
 
+Docker Hub CPU:
+
+```bash
+docker run -p 8880:8880 msgflux/fastkokoro:cpu
+```
+
 Docker GPU:
 
 ```bash
 docker build -f Dockerfile.gpu -t fastkokoro:gpu .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu
+```
+
+Docker Hub GPU:
+
+```bash
+docker run --gpus all -p 8880:8880 msgflux/fastkokoro:gpu
 ```
 
 Environment variables:

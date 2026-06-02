@@ -1,0 +1,66 @@
+name: Validate Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-release-files:
+    name: Validate Only Release Files Changed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Validate release commit
+        run: |
+          echo "Validating release commit files"
+          echo ""
+
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+
+          if ! echo "$COMMIT_MESSAGE" | grep -q "RELEASE:"; then
+            echo "Not a release commit (missing RELEASE: marker)"
+            exit 0
+          fi
+
+          echo "Files changed in this commit:"
+          echo "$CHANGED_FILES"
+          echo ""
+
+          if echo "$CHANGED_FILES" | grep -q "pyproject.toml"; then
+            echo "This is a release commit (pyproject.toml modified)"
+            echo ""
+
+            UNAUTHORIZED_FILES=""
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+
+              if [[ "$file" != "pyproject.toml" ]] && [[ "$file" != "CHANGELOG.md" ]]; then
+                UNAUTHORIZED_FILES="${UNAUTHORIZED_FILES}${file}\n"
+              fi
+            done <<< "$CHANGED_FILES"
+
+            if [ -n "$UNAUTHORIZED_FILES" ]; then
+              echo "Release commits can only modify:"
+              echo "  - pyproject.toml"
+              echo "  - CHANGELOG.md"
+              echo ""
+              echo "Unauthorized modifications detected:"
+              echo -e "$UNAUTHORIZED_FILES"
+              exit 1
+            fi
+
+            echo "Release validation passed"
+          else
+            echo "Not a release commit (pyproject.toml not modified)"
+          fi

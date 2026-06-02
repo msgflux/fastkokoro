@@ -7,11 +7,16 @@ from fastapi.responses import Response, StreamingResponse
 
 from fastkokoro.audio import media_type
 from fastkokoro.engine import FastKokoro
+from fastkokoro.json import FastJSONResponse
 from fastkokoro.openai import ModelList, ModelObject, SpeechRequest
 
 
 def create_app(engine: FastKokoro | None = None) -> FastAPI:
-    app = FastAPI(title="fastkokoro", version="0.1.0")
+    app = FastAPI(
+        title="fastkokoro",
+        version="0.1.0",
+        default_response_class=FastJSONResponse,
+    )
     app.state.engine = engine
 
     def get_engine() -> FastKokoro:
