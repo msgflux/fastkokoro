@@ -9,6 +9,13 @@ from fastkokoro.config import Settings
 
 logger = logging.getLogger("uvicorn.error")
 
+GRAPH_OPTIMIZATION_LEVELS = {
+    "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+    "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+    "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
+    "all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+}
+
 
 def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession:
     available = ort.get_available_providers()
@@ -23,6 +30,9 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
         )
 
     session_options = ort.SessionOptions()
+    session_options.graph_optimization_level = GRAPH_OPTIMIZATION_LEVELS[
+        settings.onnx_graph_optimization_level
+    ]
     if settings.onnx_intra_op_num_threads is not None:
         session_options.intra_op_num_threads = settings.onnx_intra_op_num_threads
     if settings.onnx_inter_op_num_threads is not None:
@@ -35,10 +45,11 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
     )
     logger.info(
         "ONNX Runtime session initialized: model=%s requested_providers=%s "
-        "active_providers=%s available_providers=%s",
+        "active_providers=%s available_providers=%s graph_optimization_level=%s",
         model_path,
         providers,
         session.get_providers(),
         available,
+        settings.onnx_graph_optimization_level,
     )
     return session

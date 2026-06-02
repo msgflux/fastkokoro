@@ -24,6 +24,7 @@ def _settings(**overrides):
         onnx_auto_providers=False,
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
+        onnx_graph_optimization_level="all",
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -104,3 +105,20 @@ def test_create_session_applies_thread_options():
     session_options = init.call_args.kwargs["sess_options"]
     assert session_options.intra_op_num_threads == 4
     assert session_options.inter_op_num_threads == 2
+
+
+def test_create_session_applies_graph_optimization_level():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(onnx_graph_optimization_level="extended"),
+        )
+
+    session_options = init.call_args.kwargs["sess_options"]
+    assert session_options.graph_optimization_level.name == "ORT_ENABLE_EXTENDED"

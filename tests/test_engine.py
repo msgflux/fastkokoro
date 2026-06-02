@@ -25,6 +25,7 @@ def _settings(**overrides):
         onnx_auto_providers=False,
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
+        onnx_graph_optimization_level="all",
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",

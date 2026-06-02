@@ -15,11 +15,13 @@ DEFAULT_PORT = 8880
 DEFAULT_ONNX_PROVIDERS = ("CPUExecutionProvider",)
 DEFAULT_ONNX_INTRA_OP_NUM_THREADS = min(4, os.cpu_count() or 1)
 DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
+DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL = "all"
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 SAMPLE_RATE = 24000
 STREAM_STRATEGIES = {"kokoro", "phrase", "sentence"}
+ONNX_GRAPH_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,7 @@ class Settings:
     onnx_auto_providers: bool
     onnx_intra_op_num_threads: int | None
     onnx_inter_op_num_threads: int | None
+    onnx_graph_optimization_level: str
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -77,6 +80,12 @@ class Settings:
                 os.getenv(
                     "FASTKOKORO_ONNX_INTER_OP_NUM_THREADS",
                     str(DEFAULT_ONNX_INTER_OP_NUM_THREADS),
+                )
+            ),
+            onnx_graph_optimization_level=parse_onnx_graph_optimization_level(
+                os.getenv(
+                    "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL",
+                    DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
                 )
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
@@ -126,4 +135,15 @@ def parse_stream_strategy(value: str) -> str:
     if parsed not in STREAM_STRATEGIES:
         choices = ", ".join(sorted(STREAM_STRATEGIES))
         raise ValueError(f"FASTKOKORO_STREAM_STRATEGY must be one of: {choices}")
+    return parsed
+
+
+def parse_onnx_graph_optimization_level(value: str) -> str:
+    parsed = value.strip().lower()
+    if parsed not in ONNX_GRAPH_OPTIMIZATION_LEVELS:
+        choices = ", ".join(sorted(ONNX_GRAPH_OPTIMIZATION_LEVELS))
+        raise ValueError(
+            "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL must be one of: "
+            f"{choices}"
+        )
     return parsed
