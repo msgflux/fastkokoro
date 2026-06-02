@@ -17,6 +17,8 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL", "extended")
     monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING", "false")
     monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING_DEVICE", "cuda")
+    monkeypatch.setenv("FASTKOKORO_ONNX_CUDA_GRAPH", "true")
+    monkeypatch.setenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL", "1")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS", "8")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE", "64")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL", "2")
@@ -33,6 +35,8 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_graph_optimization_level == "extended"
     assert settings.onnx_io_binding is False
     assert settings.onnx_io_binding_device == "cuda"
+    assert settings.onnx_cuda_graph is True
+    assert settings.onnx_log_severity_level == 1
     assert settings.onnx_weight_only_nbits == 8
     assert settings.onnx_weight_only_block_size == 64
     assert settings.onnx_weight_only_accuracy_level == 2
@@ -55,6 +59,8 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     )
     assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
     assert settings.onnx_io_binding_device == DEFAULT_ONNX_IO_BINDING_DEVICE
+    assert settings.onnx_cuda_graph is False
+    assert settings.onnx_log_severity_level is None
     assert settings.onnx_weight_only_nbits is None
     assert settings.stream_strategy == "phrase"
 

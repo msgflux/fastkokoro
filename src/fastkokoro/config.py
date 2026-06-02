@@ -18,6 +18,8 @@ DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
 DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL = "all"
 DEFAULT_ONNX_IO_BINDING = True
 DEFAULT_ONNX_IO_BINDING_DEVICE = "auto"
+DEFAULT_ONNX_CUDA_GRAPH = False
+DEFAULT_ONNX_LOG_SEVERITY_LEVEL = None
 DEFAULT_ONNX_WEIGHT_ONLY_NBITS = None
 DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
 DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
@@ -52,6 +54,8 @@ class Settings:
     onnx_graph_optimization_level: str
     onnx_io_binding: bool
     onnx_io_binding_device: str
+    onnx_cuda_graph: bool
+    onnx_log_severity_level: int | None
     onnx_weight_only_nbits: int | None
     onnx_weight_only_block_size: int
     onnx_weight_only_accuracy_level: int
@@ -111,6 +115,13 @@ class Settings:
                     "FASTKOKORO_ONNX_IO_BINDING_DEVICE",
                     DEFAULT_ONNX_IO_BINDING_DEVICE,
                 )
+            ),
+            onnx_cuda_graph=parse_bool(
+                os.getenv("FASTKOKORO_ONNX_CUDA_GRAPH"),
+                default=DEFAULT_ONNX_CUDA_GRAPH,
+            ),
+            onnx_log_severity_level=parse_optional_int(
+                os.getenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL")
             ),
             onnx_weight_only_nbits=parse_onnx_weight_only_nbits(
                 os.getenv("FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS")
