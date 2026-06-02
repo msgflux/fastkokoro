@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from fastkokoro.config import Settings
-from fastkokoro.onnx import create_session, provider_configs
+from fastkokoro.onnx import create_session
 
 
 def _settings(**overrides):
@@ -27,8 +27,6 @@ def _settings(**overrides):
         onnx_graph_optimization_level="all",
         onnx_io_binding=False,
         onnx_io_binding_device="auto",
-        onnx_cuda_graph=False,
-        onnx_log_severity_level=None,
         onnx_weight_only_nbits=None,
         onnx_weight_only_block_size=128,
         onnx_weight_only_accuracy_level=4,
@@ -130,15 +128,3 @@ def test_create_session_applies_graph_optimization_level():
 
     session_options = init.call_args.kwargs["sess_options"]
     assert session_options.graph_optimization_level.name == "ORT_ENABLE_EXTENDED"
-
-
-def test_provider_configs_can_enable_cuda_graph():
-    result = provider_configs(
-        ["CUDAExecutionProvider", "CPUExecutionProvider"],
-        _settings(onnx_cuda_graph=True),
-    )
-
-    assert result == [
-        ("CUDAExecutionProvider", {"enable_cuda_graph": "1"}),
-        "CPUExecutionProvider",
-    ]

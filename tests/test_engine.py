@@ -29,8 +29,6 @@ def _settings(**overrides):
         onnx_graph_optimization_level="all",
         onnx_io_binding=False,
         onnx_io_binding_device="auto",
-        onnx_cuda_graph=False,
-        onnx_log_severity_level=None,
         onnx_weight_only_nbits=None,
         onnx_weight_only_block_size=128,
         onnx_weight_only_accuracy_level=4,
