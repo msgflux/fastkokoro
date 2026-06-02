@@ -230,3 +230,23 @@ def test_settings_rejects_invalid_ttfc_shape_buckets(monkeypatch):
         assert "FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS" in str(exc)
     else:
         raise AssertionError("expected invalid ttfc shape buckets to fail")
+
+
+def test_settings_parses_cors(monkeypatch):
+    monkeypatch.setenv(
+        "FASTKOKORO_CORS_ALLOW_ORIGINS",
+        "http://localhost:3000, https://example.com",
+    )
+    monkeypatch.setenv("FASTKOKORO_CORS_ALLOW_METHODS", "GET, POST")
+    monkeypatch.setenv("FASTKOKORO_CORS_ALLOW_HEADERS", "Authorization, Content-Type")
+    monkeypatch.setenv("FASTKOKORO_CORS_ALLOW_CREDENTIALS", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.cors_allow_origins == (
+        "http://localhost:3000",
+        "https://example.com",
+    )
+    assert settings.cors_allow_methods == ("GET", "POST")
+    assert settings.cors_allow_headers == ("Authorization", "Content-Type")
+    assert settings.cors_allow_credentials is True

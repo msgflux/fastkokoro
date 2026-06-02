@@ -38,6 +38,8 @@ DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS = 12
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS = 48
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS = 4
+DEFAULT_CORS_ALLOW_METHODS = ("GET", "POST", "OPTIONS")
+DEFAULT_CORS_ALLOW_HEADERS = ("*",)
 SAMPLE_RATE = 24000
 STREAM_STRATEGIES = {"chunk", "kokoro", "phrase", "sentence"}
 ONNX_GRAPH_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
@@ -90,6 +92,10 @@ class Settings:
     stream_schedule_max_segment_words: int
     stream_cpu_schedule_max_segment_chars: int
     stream_cpu_schedule_max_segment_words: int
+    cors_allow_origins: tuple[str, ...]
+    cors_allow_methods: tuple[str, ...]
+    cors_allow_headers: tuple[str, ...]
+    cors_allow_credentials: bool
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -104,6 +110,9 @@ class Settings:
         conv_adain_custom_op_library = os.getenv(
             "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY"
         )
+        cors_allow_origins = os.getenv("FASTKOKORO_CORS_ALLOW_ORIGINS")
+        cors_allow_methods = os.getenv("FASTKOKORO_CORS_ALLOW_METHODS")
+        cors_allow_headers = os.getenv("FASTKOKORO_CORS_ALLOW_HEADERS")
 
         return cls(
             model_repo=os.getenv("FASTKOKORO_MODEL_REPO", DEFAULT_MODEL_REPO),
@@ -269,6 +278,14 @@ class Settings:
                     str(DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS),
                 ),
                 name="FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS",
+            ),
+            cors_allow_origins=parse_csv(cors_allow_origins),
+            cors_allow_methods=parse_csv(cors_allow_methods)
+            or DEFAULT_CORS_ALLOW_METHODS,
+            cors_allow_headers=parse_csv(cors_allow_headers)
+            or DEFAULT_CORS_ALLOW_HEADERS,
+            cors_allow_credentials=parse_bool(
+                os.getenv("FASTKOKORO_CORS_ALLOW_CREDENTIALS")
             ),
         )
 

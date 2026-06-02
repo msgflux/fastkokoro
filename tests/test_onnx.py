@@ -52,6 +52,10 @@ def _settings(**overrides):
         stream_schedule_max_segment_words=12,
         stream_cpu_schedule_max_segment_chars=48,
         stream_cpu_schedule_max_segment_words=4,
+        cors_allow_origins=(),
+        cors_allow_methods=("GET", "POST", "OPTIONS"),
+        cors_allow_headers=("*",),
+        cors_allow_credentials=False,
     )
     values.update(overrides)
     return Settings(**values)
