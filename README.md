@@ -14,11 +14,13 @@ and voices both come from `nvidia/kokoro-82M-onnx-opt`.
 
 ## Install
 
+With uv:
+
 ```bash
-uv sync
+uv add fastkokoro
 ```
 
-From PyPI:
+With pip:
 
 ```bash
 pip install fastkokoro
@@ -27,16 +29,38 @@ pip install fastkokoro
 For GPU builds on platforms supported by `onnxruntime-gpu`:
 
 ```bash
-uv sync --extra gpu
+uv add 'fastkokoro[gpu]'
 ```
 
 ## Run
 
 ```bash
-uv run fastkokoro
+fastkokoro
 ```
 
 The server starts on `http://0.0.0.0:8880` by default.
+
+## From Source
+
+Clone the repository and install the local development environment:
+
+```bash
+git clone https://github.com/msgflux/fastkokoro.git
+cd fastkokoro
+uv sync
+```
+
+Run the server from source:
+
+```bash
+uv run fastkokoro
+```
+
+For GPU development environments:
+
+```bash
+uv sync --extra gpu
+```
 
 ## Docker
 
