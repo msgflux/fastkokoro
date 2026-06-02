@@ -56,7 +56,7 @@ fi
 echo -e "${BLUE}Pulling latest changes from ${BASE_REMOTE}/main...${NC}"
 git pull --ff-only "$BASE_REMOTE" main
 
-CURRENT_VERSION=$(python - <<'PY'
+CURRENT_VERSION=$(uv run python - <<'PY'
 import tomllib
 with open("pyproject.toml", "rb") as file:
     print(tomllib.load(file)["project"]["version"])
