@@ -83,7 +83,16 @@ def create_app(
 
     @app.get("/metrics")
     def metrics() -> dict:
-        return app.state.metrics.snapshot()
+        snapshot = app.state.metrics.snapshot()
+        engine = get_engine()
+        snapshot["runtime"] = {
+            "model_repo": engine.settings.model_repo,
+            "model_file": engine.settings.model_file,
+            "active_providers": engine.session.get_providers(),
+            "configured_providers": list(engine.settings.onnx_providers),
+            "onnx_auto_providers": engine.settings.onnx_auto_providers,
+        }
+        return snapshot
 
     @app.get("/v1/models")
     def models() -> ModelList:

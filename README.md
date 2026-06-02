@@ -335,7 +335,9 @@ curl http://localhost:8880/metrics
 
 The metrics endpoint returns JSON counters and latency summaries for HTTP
 requests and speech generation, including streaming chunk counts, total bytes,
-and time to first speech chunk.
+time to first speech chunk, and active ONNX Runtime providers. For streaming
+speech responses, use the `speech` latency fields; HTTP middleware latency only
+tracks response setup.
 
 The server exposes the local Kokoro model as `kokoro`. For client compatibility,
 `/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases, but

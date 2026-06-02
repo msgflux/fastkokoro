@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 
@@ -8,6 +9,11 @@ from fastkokoro.server import create_app
 
 
 class FakeEngine:
+    def __init__(self):
+        self.settings = settings()
+        self.session = Mock()
+        self.session.get_providers.return_value = ["CPUExecutionProvider"]
+
     def voices(self) -> list[str]:
         return ["af_heart", "pf_dora"]
 
@@ -74,6 +80,7 @@ def test_metrics_endpoint_reports_http_requests():
     assert data["http"]["requests"] >= 1
     assert data["http"]["by_path"]["/health"] == 1
     assert data["speech"]["requests"] == 0
+    assert data["runtime"]["active_providers"] == ["CPUExecutionProvider"]
 
 
 def test_cors_preflight():
@@ -169,6 +176,7 @@ def test_speech_defaults_to_pcm_response_format():
     metrics = client.get("/metrics").json()
     assert metrics["speech"]["requests"] == 1
     assert metrics["speech"]["bytes"] == len(b"audio")
+    assert metrics["speech"]["latency_seconds_last"] >= 0
 
 
 def test_speech_accepts_portuguese_alias():
@@ -248,3 +256,4 @@ def test_speech_streaming():
     assert metrics["speech"]["chunks"] == 2
     assert metrics["speech"]["bytes"] == len(content)
     assert metrics["speech"]["first_chunk_observations"] == 1
+    assert metrics["speech"]["first_chunk_latency_seconds_last"] >= 0

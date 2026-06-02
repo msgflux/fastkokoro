@@ -14,7 +14,11 @@ class SpeechMetrics:
     chunks: int = 0
     bytes: int = 0
     latency_seconds_total: float = 0.0
+    latency_seconds_last: float = 0.0
+    latency_seconds_max: float = 0.0
     first_chunk_latency_seconds_total: float = 0.0
+    first_chunk_latency_seconds_last: float = 0.0
+    first_chunk_latency_seconds_max: float = 0.0
     first_chunk_observations: int = 0
 
 
@@ -22,6 +26,8 @@ class SpeechMetrics:
 class RequestMetrics:
     requests: int = 0
     latency_seconds_total: float = 0.0
+    latency_seconds_last: float = 0.0
+    latency_seconds_max: float = 0.0
     by_status: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     by_path: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
@@ -38,6 +44,10 @@ class Metrics:
         with self._lock:
             self._requests.requests += 1
             self._requests.latency_seconds_total += latency_seconds
+            self._requests.latency_seconds_last = latency_seconds
+            self._requests.latency_seconds_max = max(
+                self._requests.latency_seconds_max, latency_seconds
+            )
             self._requests.by_status[str(status_code)] += 1
             self._requests.by_path[path] += 1
 
@@ -58,9 +68,20 @@ class Metrics:
             self._speech.chunks += chunks
             self._speech.bytes += bytes_count
             self._speech.latency_seconds_total += latency_seconds
+            self._speech.latency_seconds_last = latency_seconds
+            self._speech.latency_seconds_max = max(
+                self._speech.latency_seconds_max, latency_seconds
+            )
             if first_chunk_latency_seconds is not None:
                 self._speech.first_chunk_latency_seconds_total += (
                     first_chunk_latency_seconds
+                )
+                self._speech.first_chunk_latency_seconds_last = (
+                    first_chunk_latency_seconds
+                )
+                self._speech.first_chunk_latency_seconds_max = max(
+                    self._speech.first_chunk_latency_seconds_max,
+                    first_chunk_latency_seconds,
                 )
                 self._speech.first_chunk_observations += 1
 
@@ -83,6 +104,8 @@ class Metrics:
                     "requests": self._requests.requests,
                     "latency_seconds_total": self._requests.latency_seconds_total,
                     "latency_seconds_avg": requests_average,
+                    "latency_seconds_last": self._requests.latency_seconds_last,
+                    "latency_seconds_max": self._requests.latency_seconds_max,
                     "by_status": dict(self._requests.by_status),
                     "by_path": dict(self._requests.by_path),
                 },
@@ -94,10 +117,18 @@ class Metrics:
                     "bytes": self._speech.bytes,
                     "latency_seconds_total": self._speech.latency_seconds_total,
                     "latency_seconds_avg": speech_average,
+                    "latency_seconds_last": self._speech.latency_seconds_last,
+                    "latency_seconds_max": self._speech.latency_seconds_max,
                     "first_chunk_latency_seconds_total": (
                         self._speech.first_chunk_latency_seconds_total
                     ),
                     "first_chunk_latency_seconds_avg": first_chunk_average,
+                    "first_chunk_latency_seconds_last": (
+                        self._speech.first_chunk_latency_seconds_last
+                    ),
+                    "first_chunk_latency_seconds_max": (
+                        self._speech.first_chunk_latency_seconds_max
+                    ),
                     "first_chunk_observations": self._speech.first_chunk_observations,
                 },
             }
