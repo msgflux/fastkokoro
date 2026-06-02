@@ -190,6 +190,39 @@ curl http://localhost:8880/v1/audio/speech \
   --output speech.pcm
 ```
 
+## OpenAI SDK Examples
+
+The examples use inline script dependencies, so they can run directly with `uv`
+without adding the OpenAI SDK to the project environment.
+
+Start `fastkokoro` first:
+
+```bash
+uv run fastkokoro
+```
+
+Save synthesized audio to a file:
+
+```bash
+uv run examples/tts_save_file.py
+```
+
+Consume streamed audio chunks:
+
+```bash
+uv run examples/tts_stream_chunks.py
+```
+
+Useful environment variables:
+
+| Variable | Default |
+| --- | --- |
+| `FASTKOKORO_BASE_URL` | `http://localhost:8880/v1` |
+| `FASTKOKORO_API_KEY` | `fastkokoro` |
+| `FASTKOKORO_VOICE` | `pf_dora` |
+| `FASTKOKORO_TEXT` | `Ola, tudo bem?` |
+| `FASTKOKORO_TTS_OUTPUT` | `speech.wav` |
+
 ## Python
 
 ```python
