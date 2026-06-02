@@ -14,7 +14,7 @@ class FakeEngine:
             raise ValueError("Unsupported language")
         if voice == "pf_dora" or lang in {"p", "pt-br"}:
             return voice or "pf_dora", "pt-br"
-        return voice or "af_heart", "a"
+        return voice or "af_heart", "en-us"
 
     def create(self, text: str, **kwargs) -> bytes:
         return b"audio"

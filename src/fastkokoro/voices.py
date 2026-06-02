@@ -9,14 +9,16 @@ SUPPORTED_MODEL_IDS = frozenset({KOKORO_MODEL_ID, *OPENAI_MODEL_ALIASES})
 
 @dataclass(frozen=True)
 class LanguageSpec:
-    code: str
+    kokoro_code: str
+    runtime_lang: str
     aliases: tuple[str, ...]
     voices: tuple[str, ...]
 
 
 LANGUAGES: tuple[LanguageSpec, ...] = (
     LanguageSpec(
-        code="a",
+        kokoro_code="a",
+        runtime_lang="en-us",
         aliases=("a", "en-us", "en_us", "american", "american-english"),
         voices=(
             "af_heart",
@@ -42,7 +44,8 @@ LANGUAGES: tuple[LanguageSpec, ...] = (
         ),
     ),
     LanguageSpec(
-        code="b",
+        kokoro_code="b",
+        runtime_lang="en-gb",
         aliases=("b", "en-gb", "en_gb", "british", "british-english"),
         voices=(
             "bf_alice",
@@ -56,12 +59,14 @@ LANGUAGES: tuple[LanguageSpec, ...] = (
         ),
     ),
     LanguageSpec(
-        code="j",
+        kokoro_code="j",
+        runtime_lang="ja",
         aliases=("j", "ja", "ja-jp", "ja_jp", "japanese"),
         voices=("jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo"),
     ),
     LanguageSpec(
-        code="z",
+        kokoro_code="z",
+        runtime_lang="zh",
         aliases=("z", "zh", "zh-cn", "zh_cn", "mandarin", "mandarin-chinese"),
         voices=(
             "zf_xiaobei",
@@ -75,27 +80,32 @@ LANGUAGES: tuple[LanguageSpec, ...] = (
         ),
     ),
     LanguageSpec(
-        code="e",
+        kokoro_code="e",
+        runtime_lang="es",
         aliases=("e", "es", "es-es", "es_es", "spanish"),
         voices=("ef_dora", "em_alex", "em_santa"),
     ),
     LanguageSpec(
-        code="f",
+        kokoro_code="f",
+        runtime_lang="fr-fr",
         aliases=("f", "fr", "fr-fr", "fr_fr", "french"),
         voices=("ff_siwis",),
     ),
     LanguageSpec(
-        code="h",
+        kokoro_code="h",
+        runtime_lang="hi",
         aliases=("h", "hi", "hi-in", "hi_in", "hindi"),
         voices=("hf_alpha", "hf_beta", "hm_omega", "hm_psi"),
     ),
     LanguageSpec(
-        code="i",
+        kokoro_code="i",
+        runtime_lang="it",
         aliases=("i", "it", "it-it", "it_it", "italian"),
         voices=("if_sara", "im_nicola"),
     ),
     LanguageSpec(
-        code="pt-br",
+        kokoro_code="p",
+        runtime_lang="pt-br",
         aliases=("p", "pt", "pt-br", "pt_br", "brazilian-portuguese", "portuguese"),
         voices=("pf_dora", "pm_alex", "pm_santa"),
     ),
@@ -120,16 +130,16 @@ def normalize_language(lang: str | None, voice: str | None, default_lang: str) -
                 "Unsupported language. Supported values: "
                 + ", ".join(sorted(SUPPORTED_LANGUAGE_ALIASES))
             )
-        return language.code
+        return language.runtime_lang
 
     if voice and voice in VOICE_TO_LANGUAGE:
-        return VOICE_TO_LANGUAGE[voice].code
+        return VOICE_TO_LANGUAGE[voice].runtime_lang
 
     default_key = default_lang.strip().lower().replace("_", "-")
     language = LANGUAGE_BY_ALIAS.get(default_key)
     if language is None:
         raise ValueError(f"Unsupported default language: {default_lang}")
-    return language.code
+    return language.runtime_lang
 
 
 def validate_voice_language(voice: str, lang: str, available_voices: set[str]) -> None:
@@ -137,8 +147,8 @@ def validate_voice_language(voice: str, lang: str, available_voices: set[str]) -
         raise ValueError(f"Voice {voice!r} is not available")
 
     language = VOICE_TO_LANGUAGE.get(voice)
-    if language is not None and language.code != lang:
+    if language is not None and language.runtime_lang != lang:
         raise ValueError(
-            f"Voice {voice!r} belongs to language {language.code!r}, "
+            f"Voice {voice!r} belongs to language {language.runtime_lang!r}, "
             f"but request language resolved to {lang!r}"
         )

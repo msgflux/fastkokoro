@@ -76,7 +76,7 @@ Environment variables:
 | `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
 | `FASTKOKORO_VOICES_PATH` | unset; downloads and converts NVIDIA voices |
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
-| `FASTKOKORO_DEFAULT_LANG` | `a` |
+| `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `hello` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
