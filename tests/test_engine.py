@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from fastkokoro.config import Settings
-from fastkokoro.engine import FastKokoro
+from fastkokoro.engine import FastKokoro, split_phonemes_for_model
 
 
 def _settings(**overrides):
@@ -151,3 +151,11 @@ def test_create_uses_cached_onnx_input_names():
     engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
 
     assert calls == []
+
+
+def test_split_phonemes_for_model_prefers_punctuation_boundaries():
+    phonemes = "a" * 500 + ". " + "b" * 20
+
+    batches = split_phonemes_for_model(phonemes)
+
+    assert batches == ["a" * 500 + ".", "b" * 20]
