@@ -37,6 +37,7 @@ def _settings(**overrides):
 class FakeKokoro:
     def __init__(self):
         self.created_texts = []
+        self.tokenizer = FakeTokenizer(self.created_texts)
 
     def get_voices(self):
         return ["af_heart"]
@@ -49,13 +50,37 @@ class FakeKokoro:
         yield np.ones(48, dtype=np.float32), 24000
 
 
+class FakeTokenizer:
+    def __init__(self, created_texts):
+        self.created_texts = created_texts
+
+    def phonemize(self, text, lang):
+        self.created_texts.append(text)
+        return text
+
+    def tokenize(self, phonemes):
+        return [ord(char) for char in phonemes]
+
+
 def _engine(settings):
     engine = object.__new__(FastKokoro)
     engine.settings = settings
     engine.model_path = Path("model.onnx")
     engine.voices_path = Path("voices.bin")
-    engine.session = SimpleNamespace(get_providers=lambda: ["CPUExecutionProvider"])
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        get_inputs=lambda: [SimpleNamespace(name="tokens")],
+        run=lambda output_names, inputs: [np.ones(48, dtype=np.float32)],
+    )
     engine.kokoro = FakeKokoro()
+    engine._voices = tuple(engine.kokoro.get_voices())
+    engine._voice_set = frozenset(engine._voices)
+    engine._voice_styles = {
+        voice: np.ones((512, 256), dtype=np.float32) for voice in engine._voices
+    }
+    engine._onnx_input_names = frozenset(
+        item.name for item in engine.session.get_inputs()
+    )
     return engine
 
 
@@ -111,3 +136,18 @@ async def test_phrase_stream_splits_text_on_commas():
     ]
 
     assert engine.kokoro.created_texts == ["Hello,", "World."]
+
+
+def test_create_uses_cached_onnx_input_names():
+    calls = []
+    engine = _engine(_settings())
+    engine._onnx_input_names = frozenset({"input_ids"})
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        get_inputs=lambda: calls.append("get_inputs"),
+        run=lambda output_names, inputs: [np.ones(48, dtype=np.float32)],
+    )
+
+    engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
+
+    assert calls == []

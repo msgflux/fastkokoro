@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncGenerator
 
 import numpy as np
-from kokoro_onnx import Kokoro
+from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro, trim_audio
 
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
@@ -23,6 +24,14 @@ class FastKokoro:
         self.voices_path = resolve_voices_path(self.settings)
         self.session = create_session(self.model_path, self.settings)
         self.kokoro = Kokoro.from_session(self.session, str(self.voices_path))
+        self._voices = tuple(self.kokoro.get_voices())
+        self._voice_set = frozenset(self._voices)
+        self._voice_styles = {
+            voice: self.kokoro.get_voice_style(voice) for voice in self._voices
+        }
+        self._onnx_input_names = frozenset(
+            item.name for item in self.session.get_inputs()
+        )
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
             "model_path=%s voices_path=%s active_providers=%s "
@@ -41,7 +50,7 @@ class FastKokoro:
         )
 
     def voices(self) -> list[str]:
-        return self.kokoro.get_voices()
+        return list(self._voices)
 
     def warmup(self) -> None:
         self.create(
@@ -56,7 +65,7 @@ class FastKokoro:
         resolved_lang = normalize_language(
             lang, resolved_voice, self.settings.default_lang
         )
-        validate_voice_language(resolved_voice, resolved_lang, set(self.voices()))
+        validate_voice_language(resolved_voice, resolved_lang, self._voice_set)
         return resolved_voice, resolved_lang
 
     def create(
@@ -87,13 +96,67 @@ class FastKokoro:
         response_format: AudioFormat,
         lang: str,
     ) -> bytes:
-        samples, sample_rate = self.kokoro.create(
+        samples, sample_rate = self._create_samples(
             text,
-            voice=voice,
+            voice=self._voice_styles[voice],
             speed=speed,
             lang=lang,
         )
         return encode_audio(samples, sample_rate, response_format)
+
+    def _create_samples(
+        self,
+        text: str,
+        *,
+        voice: np.ndarray,
+        speed: float,
+        lang: str,
+        is_phonemes: bool = False,
+        trim: bool = True,
+    ) -> tuple[np.ndarray, int]:
+        assert 0.5 <= speed <= 2.0, "Speed should be between 0.5 and 2.0"
+
+        phonemes = text if is_phonemes else self.kokoro.tokenizer.phonemize(text, lang)
+        audio_parts = []
+        for phoneme_batch in split_phonemes_for_model(phonemes):
+            audio_part = self._run_onnx_audio(phoneme_batch, voice, speed)
+            if trim:
+                audio_part, _ = trim_audio(audio_part)
+            audio_parts.append(audio_part)
+
+        if not audio_parts:
+            return np.array([], dtype=np.float32), SAMPLE_RATE
+        return np.concatenate(audio_parts), SAMPLE_RATE
+
+    def _run_onnx_audio(
+        self,
+        phonemes: str,
+        voice: np.ndarray,
+        speed: float,
+    ) -> np.ndarray:
+        phonemes = phonemes[:MAX_PHONEME_LENGTH]
+        tokens = np.array(self.kokoro.tokenizer.tokenize(phonemes), dtype=np.int64)
+        assert len(tokens) <= MAX_PHONEME_LENGTH, (
+            f"Context length is {MAX_PHONEME_LENGTH}, but leave room for the pad "
+            "token 0 at the start & end"
+        )
+
+        style = voice[len(tokens)]
+        token_input = [[0, *tokens, 0]]
+        if "input_ids" in self._onnx_input_names:
+            inputs = {
+                "input_ids": token_input,
+                "style": np.array(style, dtype=np.float32),
+                "speed": np.array([speed], dtype=np.int32),
+            }
+        else:
+            inputs = {
+                "tokens": token_input,
+                "style": style,
+                "speed": np.ones(1, dtype=np.float32) * speed,
+            }
+
+        return self.session.run(None, inputs)[0]
 
     async def create_stream(
         self,
@@ -143,3 +206,29 @@ class FastKokoro:
                 self.settings.stream_audio_frame_ms,
             ):
                 yield frame
+
+
+def split_phonemes_for_model(phonemes: str) -> list[str]:
+    parts = re.split(r"([.,!?;])", phonemes)
+    batches: list[str] = []
+    current_batch = ""
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if len(current_batch) + len(part) + 1 >= MAX_PHONEME_LENGTH:
+            if current_batch:
+                batches.append(current_batch.strip())
+            current_batch = part
+            continue
+        if part in ".,!?;":
+            current_batch += part
+        else:
+            if current_batch:
+                current_batch += " "
+            current_batch += part
+
+    if current_batch:
+        batches.append(current_batch.strip())
+    return batches
