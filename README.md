@@ -5,8 +5,8 @@ Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
 `fastkokoro` runs the 82M-parameter Kokoro text-to-speech model with low startup
 overhead, fast local inference, and a small dependency footprint. It supports CPU
 and GPU execution through ONNX Runtime providers, including CUDA, TensorRT, and
-OpenVINO when the matching runtime package is installed. The default model is
-NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
+other providers when the matching runtime package is installed. The default
+model is NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
 
 The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
 once into the `.npz` voice format expected by `kokoro-onnx`, so the default model
@@ -179,12 +179,6 @@ TensorRT with CUDA and CPU fallback:
 
 ```bash
 FASTKOKORO_ONNX_PROVIDERS=TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
-```
-
-Intel/OpenVINO builds can use:
-
-```bash
-FASTKOKORO_ONNX_PROVIDERS=OpenVINOExecutionProvider,CPUExecutionProvider uv run fastkokoro
 ```
 
 Set `FASTKOKORO_ONNX_AUTO_PROVIDERS=true` to pass every provider available in the
