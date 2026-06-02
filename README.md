@@ -15,7 +15,8 @@ and voices both come from `nvidia/kokoro-82M-onnx-opt`.
 ## Demo
 
 Watch a short demo running a Brazilian Portuguese TTS request with `fastkokoro`:
-https://youtu.be/umRND8TftEA
+
+https://github.com/user-attachments/assets/9bb0e108-cd89-4e40-a9a7-57f4c5964d52
 
 ## Install
 
