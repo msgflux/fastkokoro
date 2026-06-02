@@ -1,0 +1,58 @@
+# Streaming Benchmarks
+
+Benchmarks must run with warmup enabled. This is the default behavior in
+`fastkokoro`, and avoids mixing model/session initialization with request
+latency.
+
+Run the benchmark script:
+
+```bash
+uv run python scripts/benchmark_streaming.py --text medium
+```
+
+Run every built-in text case:
+
+```bash
+uv run python scripts/benchmark_streaming.py
+```
+
+The benchmark reports one JSON line per strategy:
+
+- `kokoro_create_stream`: current `kokoro-onnx` streaming implementation.
+- `sentence_segments`: splits text into sentences and synthesizes one sentence at
+  a time.
+- `sentence_segments_200ms_frames`: splits text into sentences, then slices the
+  generated PCM output into 200 ms frames before yielding.
+
+Important fields:
+
+- `first_chunk_latency_seconds`: time to first emitted chunk.
+- `total_latency_seconds`: total synthesis time for the strategy.
+- `chunks`: number of yielded chunks.
+- `active_providers`: ONNX Runtime providers used by the session.
+
+## Initial CPU Observations
+
+These local CPU measurements were exploratory and should be repeated without
+parallel benchmark runs before publishing formal numbers.
+
+Short text, 14 characters:
+
+| Strategy | Chunks | First chunk | Total |
+| --- | ---: | ---: | ---: |
+| `kokoro_create_stream` | 1 | 3.62s | 3.62s |
+| `sentence_segments` | 1 | 2.55s | 2.55s |
+| `sentence_segments_200ms_frames` | 6 | 2.64s | 2.64s |
+
+Medium text, 149 characters:
+
+| Strategy | Chunks | First chunk | Total |
+| --- | ---: | ---: | ---: |
+| `kokoro_create_stream` | 1 | 14.20s | 14.20s |
+| `sentence_segments` | 3 | 1.44s | 10.93s |
+| `sentence_segments_200ms_frames` | 47 | 1.82s | 11.08s |
+
+The current `kokoro-onnx` stream emits one chunk for these short and medium
+inputs, so time to first chunk is effectively total latency. Sentence-level
+segmentation improves perceived streaming latency by yielding earlier, while
+frame slicing improves playback granularity after the first sentence is ready.
