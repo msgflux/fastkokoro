@@ -14,7 +14,10 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8880
 DEFAULT_ONNX_PROVIDERS = ("CPUExecutionProvider",)
 DEFAULT_WARMUP_TEXT = "hello"
+DEFAULT_STREAM_STRATEGY = "sentence"
+DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 SAMPLE_RATE = 24000
+STREAM_STRATEGIES = {"kokoro", "sentence"}
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,8 @@ class Settings:
     onnx_inter_op_num_threads: int | None
     warmup: bool
     warmup_text: str
+    stream_strategy: str
+    stream_audio_frame_ms: int
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,6 +73,16 @@ class Settings:
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
+            stream_strategy=parse_stream_strategy(
+                os.getenv("FASTKOKORO_STREAM_STRATEGY", DEFAULT_STREAM_STRATEGY)
+            ),
+            stream_audio_frame_ms=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_AUDIO_FRAME_MS",
+                    str(DEFAULT_STREAM_AUDIO_FRAME_MS),
+                ),
+                name="FASTKOKORO_STREAM_AUDIO_FRAME_MS",
+            ),
         )
 
 
@@ -87,3 +102,20 @@ def parse_optional_int(value: str | None) -> int | None:
     if value is None or value.strip() == "":
         return None
     return int(value)
+
+
+def parse_positive_int(value: str | None, *, name: str) -> int:
+    if value is None:
+        raise ValueError(f"{name} is required")
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return parsed
+
+
+def parse_stream_strategy(value: str) -> str:
+    parsed = value.strip().lower()
+    if parsed not in STREAM_STRATEGIES:
+        choices = ", ".join(sorted(STREAM_STRATEGIES))
+        raise ValueError(f"FASTKOKORO_STREAM_STRATEGY must be one of: {choices}")
+    return parsed

@@ -26,6 +26,8 @@ def _settings(**overrides):
         onnx_inter_op_num_threads=None,
         warmup=False,
         warmup_text="hello",
+        stream_strategy="sentence",
+        stream_audio_frame_ms=200,
     )
     values.update(overrides)
     return Settings(**values)

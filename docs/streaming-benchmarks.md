@@ -24,6 +24,10 @@ The benchmark reports one JSON line per strategy:
 - `sentence_segments_200ms_frames`: splits text into sentences, then slices the
   generated PCM output into 200 ms frames before yielding.
 
+The production server now uses the sentence strategy by default through
+`FASTKOKORO_STREAM_STRATEGY=sentence`. The upstream behavior remains available
+with `FASTKOKORO_STREAM_STRATEGY=kokoro`.
+
 Important fields:
 
 - `first_chunk_latency_seconds`: time to first emitted chunk.
@@ -44,13 +48,14 @@ Short text, 14 characters:
 | `sentence_segments` | 1 | 2.55s | 2.55s |
 | `sentence_segments_200ms_frames` | 6 | 2.64s | 2.64s |
 
-Medium text, 149 characters:
+Medium text, 149 characters, rerun with warmup enabled after sentence streaming
+was added:
 
 | Strategy | Chunks | First chunk | Total |
 | --- | ---: | ---: | ---: |
-| `kokoro_create_stream` | 1 | 14.20s | 14.20s |
-| `sentence_segments` | 3 | 1.44s | 10.93s |
-| `sentence_segments_200ms_frames` | 47 | 1.82s | 11.08s |
+| `kokoro_create_stream` | 1 | 9.75s | 9.75s |
+| `sentence_segments` | 3 | 1.57s | 10.77s |
+| `sentence_segments_200ms_frames` | 47 | 1.84s | 11.56s |
 
 The current `kokoro-onnx` stream emits one chunk for these short and medium
 inputs, so time to first chunk is effectively total latency. Sentence-level

@@ -10,6 +10,7 @@ from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
+from fastkokoro.streaming import split_pcm_frames, split_sentences
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
@@ -25,7 +26,8 @@ class FastKokoro:
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
             "model_path=%s voices_path=%s active_providers=%s "
-            "default_voice=%s default_lang=%s warmup=%s",
+            "default_voice=%s default_lang=%s warmup=%s stream_strategy=%s "
+            "stream_audio_frame_ms=%s",
             self.settings.model_repo,
             self.settings.model_file,
             self.model_path,
@@ -34,6 +36,8 @@ class FastKokoro:
             self.settings.default_voice,
             self.settings.default_lang,
             self.settings.warmup,
+            self.settings.stream_strategy,
+            self.settings.stream_audio_frame_ms,
         )
 
     def voices(self) -> list[str]:
@@ -66,11 +70,28 @@ class FastKokoro:
     ) -> bytes:
         resolved_voice, resolved_lang = self.resolve_request(voice, lang)
 
-        samples, sample_rate = self.kokoro.create(
+        return self._create_resolved(
             text,
             voice=resolved_voice,
             speed=speed,
+            response_format=response_format,
             lang=resolved_lang,
+        )
+
+    def _create_resolved(
+        self,
+        text: str,
+        *,
+        voice: str,
+        speed: float,
+        response_format: AudioFormat,
+        lang: str,
+    ) -> bytes:
+        samples, sample_rate = self.kokoro.create(
+            text,
+            voice=voice,
+            speed=speed,
+            lang=lang,
         )
         return encode_audio(samples, sample_rate, response_format)
 
@@ -85,15 +106,35 @@ class FastKokoro:
     ) -> AsyncGenerator[bytes, None]:
         resolved_voice, resolved_lang = self.resolve_request(voice, lang)
 
-        stream = self.kokoro.create_stream(
-            text,
-            voice=resolved_voice,
-            speed=speed,
-            lang=resolved_lang,
-        )
-        async for samples, sample_rate in stream:
-            yield encode_audio(
-                samples.astype(np.float32),
-                sample_rate,
-                response_format,
+        if self.settings.stream_strategy == "kokoro":
+            stream = self.kokoro.create_stream(
+                text,
+                voice=resolved_voice,
+                speed=speed,
+                lang=resolved_lang,
             )
+            async for samples, sample_rate in stream:
+                yield encode_audio(
+                    samples.astype(np.float32),
+                    sample_rate,
+                    response_format,
+                )
+            return
+
+        for segment in split_sentences(text):
+            audio = self._create_resolved(
+                segment,
+                voice=resolved_voice,
+                speed=speed,
+                response_format=response_format,
+                lang=resolved_lang,
+            )
+            if response_format != "pcm":
+                yield audio
+                continue
+
+            for frame in split_pcm_frames(
+                audio,
+                self.settings.stream_audio_frame_ms,
+            ):
+                yield frame
