@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 
 import numpy as np
@@ -11,6 +12,8 @@ from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
 from fastkokoro.voices import normalize_language, validate_voice_language
 
+logger = logging.getLogger("uvicorn.error")
+
 
 class FastKokoro:
     def __init__(self, settings: Settings | None = None):
@@ -19,6 +22,19 @@ class FastKokoro:
         self.voices_path = resolve_voices_path(self.settings)
         self.session = create_session(self.model_path, self.settings)
         self.kokoro = Kokoro.from_session(self.session, str(self.voices_path))
+        logger.info(
+            "fastkokoro engine initialized: model_repo=%s model_file=%s "
+            "model_path=%s voices_path=%s active_providers=%s "
+            "default_voice=%s default_lang=%s warmup=%s",
+            self.settings.model_repo,
+            self.settings.model_file,
+            self.model_path,
+            self.voices_path,
+            self.session.get_providers(),
+            self.settings.default_voice,
+            self.settings.default_lang,
+            self.settings.warmup,
+        )
 
     def voices(self) -> list[str]:
         return self.kokoro.get_voices()

@@ -33,6 +33,7 @@ def _settings(**overrides):
 
 def test_create_session_uses_configured_providers():
     session = Mock()
+    session.get_providers.return_value = ["CPUExecutionProvider"]
     with (
         patch(
             "fastkokoro.onnx.ort.get_available_providers",
@@ -44,15 +45,21 @@ def test_create_session_uses_configured_providers():
 
     assert result is session
     assert init.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
+    assert session.get_providers.called
 
 
 def test_create_session_auto_uses_all_available_providers():
+    session = Mock()
+    session.get_providers.return_value = [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
     with (
         patch(
             "fastkokoro.onnx.ort.get_available_providers",
             return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
         ),
-        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+        patch("fastkokoro.onnx.ort.InferenceSession", return_value=session) as init,
     ):
         create_session(Path("model.onnx"), _settings(onnx_auto_providers=True))
 
