@@ -12,6 +12,11 @@ The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts 
 once into the `.npz` voice format expected by `kokoro-onnx`, so the default model
 and voices both come from `nvidia/kokoro-82M-onnx-opt`.
 
+## Demo
+
+Watch a short demo running a Brazilian Portuguese TTS request with `fastkokoro`:
+https://youtu.be/umRND8TftEA
+
 ## Install
 
 With uv:
