@@ -38,6 +38,7 @@ DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS = 12
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS = 48
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS = 4
+DEFAULT_CORS_ALLOW_ORIGINS = ("*",)
 DEFAULT_CORS_ALLOW_METHODS = ("GET", "POST", "OPTIONS")
 DEFAULT_CORS_ALLOW_HEADERS = ("*",)
 SAMPLE_RATE = 24000
@@ -279,7 +280,8 @@ class Settings:
                 ),
                 name="FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS",
             ),
-            cors_allow_origins=parse_csv(cors_allow_origins),
+            cors_allow_origins=parse_csv(cors_allow_origins)
+            or DEFAULT_CORS_ALLOW_ORIGINS,
             cors_allow_methods=parse_csv(cors_allow_methods)
             or DEFAULT_CORS_ALLOW_METHODS,
             cors_allow_headers=parse_csv(cors_allow_headers)

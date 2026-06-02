@@ -49,14 +49,13 @@ def create_app(
         return app.state.settings
 
     settings = get_settings()
-    if settings.cors_allow_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=list(settings.cors_allow_origins),
-            allow_methods=list(settings.cors_allow_methods),
-            allow_headers=list(settings.cors_allow_headers),
-            allow_credentials=settings.cors_allow_credentials,
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allow_origins),
+        allow_methods=list(settings.cors_allow_methods),
+        allow_headers=list(settings.cors_allow_headers),
+        allow_credentials=settings.cors_allow_credentials,
+    )
 
     def get_engine() -> FastKokoro:
         if app.state.engine is None:

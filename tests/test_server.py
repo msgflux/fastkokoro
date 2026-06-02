@@ -45,7 +45,7 @@ def settings(**overrides):
         onnx_inter_op_num_threads=None,
         warmup=False,
         warmup_text="hello",
-        cors_allow_origins=(),
+        cors_allow_origins=("*",),
         cors_allow_methods=("GET", "POST", "OPTIONS"),
         cors_allow_headers=("*",),
         cors_allow_credentials=False,
@@ -98,6 +98,21 @@ def test_cors_preflight():
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_cors_default_allows_any_origin():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.options(
+        "/v1/audio/speech",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
 
 
 def test_models():

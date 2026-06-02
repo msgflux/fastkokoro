@@ -179,7 +179,7 @@ Environment variables:
 | `FASTKOKORO_ONNX_CONV_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` | unset |
-| `FASTKOKORO_CORS_ALLOW_ORIGINS` | unset; CORS disabled |
+| `FASTKOKORO_CORS_ALLOW_ORIGINS` | `*` |
 | `FASTKOKORO_CORS_ALLOW_METHODS` | `GET,POST,OPTIONS` |
 | `FASTKOKORO_CORS_ALLOW_HEADERS` | `*` |
 | `FASTKOKORO_CORS_ALLOW_CREDENTIALS` | `false` |
@@ -265,7 +265,7 @@ uv run fastkokoro-build-conv-adain-op --print-env
 This path is highly hardware-dependent and may regress latency on some CPUs.
 Always benchmark against the baseline before enabling it in production.
 
-Enable CORS by setting one or more allowed origins:
+Restrict CORS by setting one or more allowed origins:
 
 ```bash
 FASTKOKORO_CORS_ALLOW_ORIGINS=http://localhost:3000 fastkokoro

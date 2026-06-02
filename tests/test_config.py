@@ -105,6 +105,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
     monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
     monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
+    monkeypatch.delenv("FASTKOKORO_CORS_ALLOW_ORIGINS", raising=False)
 
     settings = Settings.from_env()
 
@@ -136,6 +137,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.stream_schedule_max_segment_words == 12
     assert settings.stream_cpu_schedule_max_segment_chars == 48
     assert settings.stream_cpu_schedule_max_segment_words == 4
+    assert settings.cors_allow_origins == ("*",)
 
 
 def test_settings_allows_ort_default_thread_options(monkeypatch):
