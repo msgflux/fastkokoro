@@ -339,6 +339,10 @@ time to first speech chunk, and active ONNX Runtime providers. For streaming
 speech responses, use the `speech` latency fields; HTTP middleware latency only
 tracks response setup.
 
+Run benchmarks with `FASTKOKORO_WARMUP=true`, which is the default. Compare
+requests after startup so model/session initialization does not pollute latency
+measurements.
+
 The server exposes the local Kokoro model as `kokoro`. For client compatibility,
 `/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases, but
 they are not listed by `/v1/models` because the server is not running OpenAI TTS
