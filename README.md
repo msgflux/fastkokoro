@@ -2,10 +2,11 @@
 
 Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
 
-`fastkokoro` is focused on running Kokoro without a Torch server. It uses
-`kokoro-onnx` for tokenization, phonemization, ONNX Runtime inference, and voice
-handling. The default model is NVIDIA's optimized ONNX export:
-`nvidia/kokoro-82M-onnx-opt`.
+`fastkokoro` runs the 82M-parameter Kokoro text-to-speech model with low startup
+overhead, fast local inference, and a small dependency footprint. It supports CPU
+and GPU execution through ONNX Runtime providers, including CUDA, TensorRT, and
+OpenVINO when the matching runtime package is installed. The default model is
+NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
 
 The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
 once into the `.npz` voice format expected by `kokoro-onnx`, so the default model
@@ -157,9 +158,6 @@ the requested voice belongs to the resolved language.
 | Hindi | `h`, `hi`, `hi-in` | `hf_alpha`, `hf_beta`, `hm_omega`, `hm_psi` |
 | Italian | `i`, `it`, `it-it` | `if_sara`, `im_nicola` |
 | Brazilian Portuguese | `p`, `pt`, `pt-br` | `pf_dora`, `pm_alex`, `pm_santa` |
-
-Brazilian Portuguese works best when using one of the PT-BR voices:
-`pf_dora`, `pm_alex`, or `pm_santa`.
 
 Speech:
 
