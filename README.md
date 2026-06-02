@@ -76,11 +76,17 @@ Environment variables:
 | `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
 | `FASTKOKORO_VOICES_PATH` | unset; downloads and converts NVIDIA voices |
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
-| `FASTKOKORO_DEFAULT_LANG` | `en-us` |
+| `FASTKOKORO_DEFAULT_LANG` | `a` |
+| `FASTKOKORO_WARMUP` | `true` |
+| `FASTKOKORO_WARMUP_TEXT` | `hello` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
 | `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | unset |
 | `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | unset |
+
+`FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
+server take a little longer to become ready, but avoids paying most of the first
+request latency on the first user request.
 
 ## ONNX Runtime Providers
 
@@ -128,6 +134,32 @@ Models:
 ```bash
 curl http://localhost:8880/v1/models
 ```
+
+The server exposes the local Kokoro model as `kokoro`. For client compatibility,
+`/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases, but
+they are not listed by `/v1/models` because the server is not running OpenAI TTS
+models.
+
+## Voices and Languages
+
+The official Kokoro voice list maps voices to language codes. `fastkokoro`
+accepts the Kokoro language code and common locale aliases, then validates that
+the requested voice belongs to the resolved language.
+
+| Language | Request `lang` values | Voices |
+| --- | --- | --- |
+| American English | `a`, `en-us`, `american` | `af_heart`, `af_alloy`, `af_aoede`, `af_bella`, `af_jessica`, `af_kore`, `af_nicole`, `af_nova`, `af_river`, `af_sarah`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_fenrir`, `am_liam`, `am_michael`, `am_onyx`, `am_puck`, `am_santa` |
+| British English | `b`, `en-gb`, `british` | `bf_alice`, `bf_emma`, `bf_isabella`, `bf_lily`, `bm_daniel`, `bm_fable`, `bm_george`, `bm_lewis` |
+| Japanese | `j`, `ja`, `ja-jp` | `jf_alpha`, `jf_gongitsune`, `jf_nezumi`, `jf_tebukuro`, `jm_kumo` |
+| Mandarin Chinese | `z`, `zh`, `zh-cn`, `mandarin` | `zf_xiaobei`, `zf_xiaoni`, `zf_xiaoxiao`, `zf_xiaoyi`, `zm_yunjian`, `zm_yunxi`, `zm_yunxia`, `zm_yunyang` |
+| Spanish | `e`, `es`, `es-es` | `ef_dora`, `em_alex`, `em_santa` |
+| French | `f`, `fr`, `fr-fr` | `ff_siwis` |
+| Hindi | `h`, `hi`, `hi-in` | `hf_alpha`, `hf_beta`, `hm_omega`, `hm_psi` |
+| Italian | `i`, `it`, `it-it` | `if_sara`, `im_nicola` |
+| Brazilian Portuguese | `p`, `pt`, `pt-br` | `pf_dora`, `pm_alex`, `pm_santa` |
+
+Brazilian Portuguese works best when using one of the PT-BR voices:
+`pf_dora`, `pm_alex`, or `pm_santa`.
 
 Speech:
 

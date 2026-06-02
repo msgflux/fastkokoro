@@ -9,6 +9,7 @@ from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
+from fastkokoro.voices import normalize_language, validate_voice_language
 
 
 class FastKokoro:
@@ -22,6 +23,22 @@ class FastKokoro:
     def voices(self) -> list[str]:
         return self.kokoro.get_voices()
 
+    def warmup(self) -> None:
+        self.create(
+            self.settings.warmup_text,
+            voice=self.settings.default_voice,
+            response_format="pcm",
+            lang=self.settings.default_lang,
+        )
+
+    def resolve_request(self, voice: str | None, lang: str | None) -> tuple[str, str]:
+        resolved_voice = voice or self.settings.default_voice
+        resolved_lang = normalize_language(
+            lang, resolved_voice, self.settings.default_lang
+        )
+        validate_voice_language(resolved_voice, resolved_lang, set(self.voices()))
+        return resolved_voice, resolved_lang
+
     def create(
         self,
         text: str,
@@ -31,11 +48,13 @@ class FastKokoro:
         response_format: AudioFormat = "mp3",
         lang: str | None = None,
     ) -> bytes:
+        resolved_voice, resolved_lang = self.resolve_request(voice, lang)
+
         samples, sample_rate = self.kokoro.create(
             text,
-            voice=voice or self.settings.default_voice,
+            voice=resolved_voice,
             speed=speed,
-            lang=lang or self.settings.default_lang,
+            lang=resolved_lang,
         )
         return encode_audio(samples, sample_rate, response_format)
 
@@ -48,11 +67,13 @@ class FastKokoro:
         response_format: AudioFormat = "pcm",
         lang: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
+        resolved_voice, resolved_lang = self.resolve_request(voice, lang)
+
         stream = self.kokoro.create_stream(
             text,
-            voice=voice or self.settings.default_voice,
+            voice=resolved_voice,
             speed=speed,
-            lang=lang or self.settings.default_lang,
+            lang=resolved_lang,
         )
         async for samples, sample_rate in stream:
             yield encode_audio(

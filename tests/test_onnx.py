@@ -24,6 +24,8 @@ def _settings(**overrides):
         onnx_auto_providers=False,
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
+        warmup=False,
+        warmup_text="hello",
     )
     values.update(overrides)
     return Settings(**values)

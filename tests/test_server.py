@@ -9,6 +9,13 @@ class FakeEngine:
     def voices(self) -> list[str]:
         return ["af_heart", "pf_dora"]
 
+    def resolve_request(self, voice: str | None, lang: str | None) -> tuple[str, str]:
+        if lang == "bad":
+            raise ValueError("Unsupported language")
+        if voice == "pf_dora" or lang in {"p", "pt-br"}:
+            return voice or "pf_dora", "pt-br"
+        return voice or "af_heart", "a"
+
     def create(self, text: str, **kwargs) -> bytes:
         return b"audio"
 
@@ -33,7 +40,7 @@ def test_models():
 
     assert response.status_code == 200
     model_ids = {item["id"] for item in response.json()["data"]}
-    assert {"kokoro", "tts-1", "gpt-4o-mini-tts"} <= model_ids
+    assert model_ids == {"kokoro"}
 
 
 def test_voices():
@@ -61,6 +68,57 @@ def test_speech_non_streaming():
     assert response.status_code == 200
     assert response.content == b"audio"
     assert response.headers["content-type"].startswith("audio/pcm")
+
+
+def test_speech_accepts_portuguese_alias():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "kokoro",
+            "input": "ola",
+            "voice": "pf_dora",
+            "response_format": "pcm",
+            "lang": "p",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"audio"
+
+
+def test_speech_rejects_unsupported_language():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "kokoro",
+            "input": "hello",
+            "voice": "af_heart",
+            "lang": "bad",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported language"
+
+
+def test_speech_rejects_unsupported_model():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "unknown",
+            "input": "hello",
+            "voice": "af_heart",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported model" in response.json()["detail"]
 
 
 def test_speech_streaming():
