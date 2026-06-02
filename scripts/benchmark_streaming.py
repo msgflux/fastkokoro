@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import re
 import time
-from collections.abc import AsyncGenerator, Iterable
+from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass
 
+import numpy as np
+
+from fastkokoro.audio import encode_audio
 from fastkokoro.engine import FastKokoro
+from fastkokoro.streaming import split_pcm_frames, split_sentences
 
 TEXTS = {
     "short": "Ola, tudo bem?",
@@ -62,13 +65,7 @@ async def main() -> None:
                 "kokoro_create_stream",
                 text_name,
                 text,
-                engine.create_stream(
-                    text,
-                    voice=args.voice,
-                    lang=args.lang,
-                    speed=args.speed,
-                    response_format="pcm",
-                ),
+                kokoro_create_stream(engine, text, args.voice, args.lang, args.speed),
                 engine,
             ),
             await measure(
@@ -169,18 +166,18 @@ async def framed_sentence_segment_stream(
             yield frame
 
 
-def split_sentences(text: str) -> list[str]:
-    segments = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", text)]
-    return [segment for segment in segments if segment]
-
-
-def split_pcm_frames(audio: bytes, frame_ms: int) -> Iterable[bytes]:
-    sample_rate = 24000
-    bytes_per_sample = 2
-    frame_size = max(1, int(sample_rate * bytes_per_sample * frame_ms / 1000))
-    frame_size -= frame_size % bytes_per_sample
-    for index in range(0, len(audio), frame_size):
-        yield audio[index : index + frame_size]
+async def kokoro_create_stream(
+    engine: FastKokoro, text: str, voice: str, lang: str, speed: float
+) -> AsyncGenerator[bytes, None]:
+    resolved_voice, resolved_lang = engine.resolve_request(voice, lang)
+    stream = engine.kokoro.create_stream(
+        text,
+        voice=resolved_voice,
+        speed=speed,
+        lang=resolved_lang,
+    )
+    async for samples, sample_rate in stream:
+        yield encode_audio(samples.astype(np.float32), sample_rate, "pcm")
 
 
 if __name__ == "__main__":

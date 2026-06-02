@@ -34,3 +34,24 @@ def test_settings_parses_auto_providers(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.onnx_auto_providers is True
+
+
+def test_settings_parses_stream_options(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_STREAM_STRATEGY", "kokoro")
+    monkeypatch.setenv("FASTKOKORO_STREAM_AUDIO_FRAME_MS", "80")
+
+    settings = Settings.from_env()
+
+    assert settings.stream_strategy == "kokoro"
+    assert settings.stream_audio_frame_ms == 80
+
+
+def test_settings_rejects_invalid_stream_strategy(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_STREAM_STRATEGY", "invalid")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "FASTKOKORO_STREAM_STRATEGY" in str(exc)
+    else:
+        raise AssertionError("expected invalid stream strategy to fail")

@@ -121,6 +121,8 @@ Environment variables:
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `hello` |
+| `FASTKOKORO_STREAM_STRATEGY` | `sentence` |
+| `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
 | `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | unset |
@@ -129,6 +131,12 @@ Environment variables:
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
+
+`FASTKOKORO_STREAM_STRATEGY=sentence` streams by synthesizing one sentence at a
+time. For `response_format=pcm`, the server also slices each sentence into
+smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
+`FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
+path directly.
 
 ## ONNX Runtime Providers
 
