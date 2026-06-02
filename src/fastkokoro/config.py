@@ -18,13 +18,18 @@ DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
 DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL = "all"
 DEFAULT_ONNX_IO_BINDING = True
 DEFAULT_ONNX_IO_BINDING_DEVICE = "auto"
+DEFAULT_ONNX_WEIGHT_ONLY_NBITS = None
+DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
+DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
+DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_WARMUP_TEXT = "hello"
-DEFAULT_STREAM_STRATEGY = "sentence"
+DEFAULT_STREAM_STRATEGY = "phrase"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 SAMPLE_RATE = 24000
 STREAM_STRATEGIES = {"kokoro", "phrase", "sentence"}
 ONNX_GRAPH_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
 ONNX_IO_BINDING_DEVICES = {"auto", "cpu", "cuda"}
+ONNX_WEIGHT_ONLY_NBITS = {4, 8}
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,10 @@ class Settings:
     onnx_graph_optimization_level: str
     onnx_io_binding: bool
     onnx_io_binding_device: str
+    onnx_weight_only_nbits: int | None
+    onnx_weight_only_block_size: int
+    onnx_weight_only_accuracy_level: int
+    onnx_weight_only_symmetric: bool
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -103,6 +112,27 @@ class Settings:
                     DEFAULT_ONNX_IO_BINDING_DEVICE,
                 )
             ),
+            onnx_weight_only_nbits=parse_onnx_weight_only_nbits(
+                os.getenv("FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS")
+            ),
+            onnx_weight_only_block_size=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE",
+                    str(DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE),
+                ),
+                name="FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE",
+            ),
+            onnx_weight_only_accuracy_level=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL",
+                    str(DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL),
+                ),
+                name="FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL",
+            ),
+            onnx_weight_only_symmetric=parse_bool(
+                os.getenv("FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC"),
+                default=DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC,
+            ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
             stream_strategy=parse_stream_strategy(
@@ -145,6 +175,15 @@ def parse_positive_int(value: str | None, *, name: str) -> int:
     return parsed
 
 
+def parse_non_negative_int(value: str | None, *, name: str) -> int:
+    if value is None:
+        raise ValueError(f"{name} is required")
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be zero or greater")
+    return parsed
+
+
 def parse_stream_strategy(value: str) -> str:
     parsed = value.strip().lower()
     if parsed not in STREAM_STRATEGIES:
@@ -158,8 +197,7 @@ def parse_onnx_graph_optimization_level(value: str) -> str:
     if parsed not in ONNX_GRAPH_OPTIMIZATION_LEVELS:
         choices = ", ".join(sorted(ONNX_GRAPH_OPTIMIZATION_LEVELS))
         raise ValueError(
-            "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL must be one of: "
-            f"{choices}"
+            f"FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL must be one of: {choices}"
         )
     return parsed
 
@@ -168,8 +206,15 @@ def parse_onnx_io_binding_device(value: str) -> str:
     parsed = value.strip().lower()
     if parsed not in ONNX_IO_BINDING_DEVICES:
         choices = ", ".join(sorted(ONNX_IO_BINDING_DEVICES))
-        raise ValueError(
-            "FASTKOKORO_ONNX_IO_BINDING_DEVICE must be one of: "
-            f"{choices}"
-        )
+        raise ValueError(f"FASTKOKORO_ONNX_IO_BINDING_DEVICE must be one of: {choices}")
+    return parsed
+
+
+def parse_onnx_weight_only_nbits(value: str | None) -> int | None:
+    if value is None or value.strip() == "":
+        return DEFAULT_ONNX_WEIGHT_ONLY_NBITS
+    parsed = int(value)
+    if parsed not in ONNX_WEIGHT_ONLY_NBITS:
+        choices = ", ".join(str(choice) for choice in sorted(ONNX_WEIGHT_ONLY_NBITS))
+        raise ValueError(f"FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS must be one of: {choices}")
     return parsed

@@ -14,6 +14,7 @@ from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
+from fastkokoro.quantization import resolve_quantized_model_path
 from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
 from fastkokoro.voices import normalize_language, validate_voice_language
 
@@ -30,7 +31,10 @@ class OnnxInputBuffers:
 class FastKokoro:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
-        self.model_path = resolve_model_path(self.settings)
+        self.model_path = resolve_quantized_model_path(
+            resolve_model_path(self.settings),
+            self.settings,
+        )
         self.voices_path = resolve_voices_path(self.settings)
         self.session = create_session(self.model_path, self.settings)
         self.kokoro = Kokoro.from_session(self.session, str(self.voices_path))
@@ -199,9 +203,7 @@ class FastKokoro:
             try:
                 return self._run_onnx_audio_cuda_iobinding(inputs)
             except RuntimeError:
-                logger.exception(
-                    "CUDA IOBinding failed; falling back to CPU IOBinding"
-                )
+                logger.exception("CUDA IOBinding failed; falling back to CPU IOBinding")
                 return self._run_onnx_audio_cpu_iobinding(inputs)
         return self._run_onnx_audio_cpu_iobinding(inputs)
 

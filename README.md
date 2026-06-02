@@ -121,21 +121,28 @@ Environment variables:
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `hello` |
-| `FASTKOKORO_STREAM_STRATEGY` | `sentence` |
+| `FASTKOKORO_STREAM_STRATEGY` | `phrase` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
 | `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | `min(4, CPU count)` |
 | `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | `1` |
+| `FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL` | `all` |
+| `FASTKOKORO_ONNX_IO_BINDING` | `true` |
+| `FASTKOKORO_ONNX_IO_BINDING_DEVICE` | `auto` |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS` | unset; disabled |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE` | `128` |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL` | `4` |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
 
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
-`FASTKOKORO_STREAM_STRATEGY=sentence` streams by synthesizing one sentence at a
-time. Set `FASTKOKORO_STREAM_STRATEGY=phrase` for lower time to first chunk by
-splitting on phrase punctuation such as commas, semicolons, and question marks.
-For `response_format=pcm`, the server also slices each generated segment into
+`FASTKOKORO_STREAM_STRATEGY=phrase` streams by splitting on phrase punctuation
+such as commas, semicolons, and question marks. Set
+`FASTKOKORO_STREAM_STRATEGY=sentence` to synthesize one sentence at a time. For
+`response_format=pcm`, the server also slices each generated segment into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
 path directly.
@@ -144,6 +151,12 @@ The default ONNX Runtime thread settings prioritize low CPU latency. Set
 `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` or
 `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` to an empty value to use ONNX Runtime's
 own defaults.
+
+Set `FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS=4` or
+`FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS=8` to generate a MatMul weight-only
+quantized ONNX model on startup. The generated model is cached under
+`FASTKOKORO_CACHE_DIR/quantized` and reused on later starts with the same
+settings.
 
 ## ONNX Runtime Providers
 

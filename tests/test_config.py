@@ -17,6 +17,10 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL", "extended")
     monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING", "false")
     monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING_DEVICE", "cuda")
+    monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS", "8")
+    monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE", "64")
+    monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL", "2")
+    monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC", "false")
 
     settings = Settings.from_env()
 
@@ -29,6 +33,10 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_graph_optimization_level == "extended"
     assert settings.onnx_io_binding is False
     assert settings.onnx_io_binding_device == "cuda"
+    assert settings.onnx_weight_only_nbits == 8
+    assert settings.onnx_weight_only_block_size == 64
+    assert settings.onnx_weight_only_accuracy_level == 2
+    assert settings.onnx_weight_only_symmetric is False
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -47,6 +55,8 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     )
     assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
     assert settings.onnx_io_binding_device == DEFAULT_ONNX_IO_BINDING_DEVICE
+    assert settings.onnx_weight_only_nbits is None
+    assert settings.stream_strategy == "phrase"
 
 
 def test_settings_allows_ort_default_thread_options(monkeypatch):
@@ -108,3 +118,14 @@ def test_settings_rejects_invalid_iobinding_device(monkeypatch):
         assert "FASTKOKORO_ONNX_IO_BINDING_DEVICE" in str(exc)
     else:
         raise AssertionError("expected invalid IOBinding device to fail")
+
+
+def test_settings_rejects_invalid_weight_only_nbits(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS", "3")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS" in str(exc)
+    else:
+        raise AssertionError("expected invalid weight-only nbits to fail")
