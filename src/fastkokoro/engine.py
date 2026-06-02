@@ -10,7 +10,7 @@ from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
-from fastkokoro.streaming import split_pcm_frames, split_sentences
+from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
@@ -121,7 +121,12 @@ class FastKokoro:
                 )
             return
 
-        for segment in split_sentences(text):
+        if self.settings.stream_strategy == "phrase":
+            segments = split_phrases(text)
+        else:
+            segments = split_sentences(text)
+
+        for segment in segments:
             audio = self._create_resolved(
                 segment,
                 voice=resolved_voice,

@@ -23,10 +23,15 @@ The benchmark reports one JSON line per strategy:
   a time.
 - `sentence_segments_200ms_frames`: splits text into sentences, then slices the
   generated PCM output into 200 ms frames before yielding.
+- `phrase_segments_200ms_frames`: splits text on phrase punctuation such as
+  commas, then slices the generated PCM output into 200 ms frames before
+  yielding.
 
 The production server now uses the sentence strategy by default through
 `FASTKOKORO_STREAM_STRATEGY=sentence`. The upstream behavior remains available
-with `FASTKOKORO_STREAM_STRATEGY=kokoro`.
+with `FASTKOKORO_STREAM_STRATEGY=kokoro`. Interactive clients can use
+`FASTKOKORO_STREAM_STRATEGY=phrase` when lower TTFC is more important than total
+generation time.
 
 Important fields:
 

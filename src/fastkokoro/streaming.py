@@ -13,6 +13,11 @@ def split_sentences(text: str) -> list[str]:
     return [segment for segment in segments if segment]
 
 
+def split_phrases(text: str) -> list[str]:
+    segments = [segment.strip() for segment in re.split(r"(?<=[,;:!?])\s+", text)]
+    return [segment for segment in segments if segment]
+
+
 def split_pcm_frames(
     audio: bytes,
     frame_ms: int,

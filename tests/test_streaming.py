@@ -1,4 +1,4 @@
-from fastkokoro.streaming import split_pcm_frames, split_sentences
+from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
 
 
 def test_split_sentences_keeps_sentence_punctuation():
@@ -11,6 +11,10 @@ def test_split_sentences_keeps_sentence_punctuation():
 
 def test_split_sentences_returns_whole_text_without_punctuation():
     assert split_sentences("texto sem pontuacao") == ["texto sem pontuacao"]
+
+
+def test_split_phrases_splits_commas_and_sentence_punctuation():
+    assert split_phrases("Ola, tudo bem? Sim.") == ["Ola,", "tudo bem?", "Sim."]
 
 
 def test_split_pcm_frames_uses_even_sample_boundaries():

@@ -94,3 +94,20 @@ async def test_kokoro_stream_strategy_uses_upstream_stream():
 
     assert engine.kokoro.created_texts == []
     assert len(chunks) == 1
+
+
+@pytest.mark.asyncio
+async def test_phrase_stream_splits_text_on_commas():
+    engine = _engine(_settings(stream_strategy="phrase", stream_audio_frame_ms=1))
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            "Hello, World.",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert engine.kokoro.created_texts == ["Hello,", "World."]
