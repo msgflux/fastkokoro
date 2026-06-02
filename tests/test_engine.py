@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import local
 from types import SimpleNamespace
 
 import numpy as np
@@ -26,6 +27,7 @@ def _settings(**overrides):
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
         onnx_graph_optimization_level="all",
+        onnx_io_binding=False,
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -71,6 +73,7 @@ def _engine(settings):
     engine.session = SimpleNamespace(
         get_providers=lambda: ["CPUExecutionProvider"],
         get_inputs=lambda: [SimpleNamespace(name="tokens")],
+        get_outputs=lambda: [SimpleNamespace(name="audio")],
         run=lambda output_names, inputs: [np.ones(48, dtype=np.float32)],
     )
     engine.kokoro = FakeKokoro()
@@ -82,6 +85,11 @@ def _engine(settings):
     engine._onnx_input_names = frozenset(
         item.name for item in engine.session.get_inputs()
     )
+    engine._onnx_output_name = engine.session.get_outputs()[0].name
+    engine._token_input_name = (
+        "input_ids" if "input_ids" in engine._onnx_input_names else "tokens"
+    )
+    engine._onnx_input_buffers = local()
     return engine
 
 
@@ -152,6 +160,60 @@ def test_create_uses_cached_onnx_input_names():
     engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
 
     assert calls == []
+
+
+def test_create_reuses_preallocated_token_inputs():
+    captured = []
+    engine = _engine(_settings())
+
+    def run(output_names, inputs):
+        captured.append(inputs)
+        return [np.ones(48, dtype=np.float32)]
+
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        run=run,
+    )
+
+    engine.create("Hi.", voice="af_heart", lang="en-us", response_format="pcm")
+    engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
+
+    first_tokens = captured[0]["tokens"]
+    second_tokens = captured[1]["tokens"]
+    assert first_tokens.base is second_tokens.base
+    assert first_tokens.shape == (1, 5)
+    assert second_tokens.shape == (1, 8)
+
+
+def test_create_can_run_with_iobinding():
+    class FakeBinding:
+        def __init__(self):
+            self.inputs = {}
+            self.output_name = None
+
+        def bind_cpu_input(self, name, value):
+            self.inputs[name] = value
+
+        def bind_output(self, name):
+            self.output_name = name
+
+        def copy_outputs_to_cpu(self):
+            return [np.ones(48, dtype=np.float32)]
+
+    binding = FakeBinding()
+    calls = []
+    engine = _engine(_settings(onnx_io_binding=True))
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        io_binding=lambda: binding,
+        run_with_iobinding=lambda value: calls.append(value),
+    )
+
+    engine.create("Hello.", voice="af_heart", lang="en-us", response_format="pcm")
+
+    assert calls == [binding]
+    assert set(binding.inputs) == {"tokens", "style", "speed"}
+    assert binding.output_name == "audio"
 
 
 def test_split_phonemes_for_model_prefers_punctuation_boundaries():

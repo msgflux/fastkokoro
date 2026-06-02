@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 
 import numpy as np
 from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro, trim_audio
@@ -15,6 +17,13 @@ from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentence
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
+
+
+@dataclass
+class OnnxInputBuffers:
+    token_ids: np.ndarray
+    speed_float32: np.ndarray
+    speed_int32: np.ndarray
 
 
 class FastKokoro:
@@ -32,6 +41,11 @@ class FastKokoro:
         self._onnx_input_names = frozenset(
             item.name for item in self.session.get_inputs()
         )
+        self._onnx_output_name = self.session.get_outputs()[0].name
+        self._token_input_name = (
+            "input_ids" if "input_ids" in self._onnx_input_names else "tokens"
+        )
+        self._onnx_input_buffers = threading.local()
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
             "model_path=%s voices_path=%s active_providers=%s "
@@ -135,28 +149,67 @@ class FastKokoro:
         speed: float,
     ) -> np.ndarray:
         phonemes = phonemes[:MAX_PHONEME_LENGTH]
-        tokens = np.array(self.kokoro.tokenizer.tokenize(phonemes), dtype=np.int64)
-        assert len(tokens) <= MAX_PHONEME_LENGTH, (
+        token_ids = self.kokoro.tokenizer.tokenize(phonemes)
+        assert len(token_ids) <= MAX_PHONEME_LENGTH, (
             f"Context length is {MAX_PHONEME_LENGTH}, but leave room for the pad "
             "token 0 at the start & end"
         )
 
-        style = voice[len(tokens)]
-        token_input = [[0, *tokens, 0]]
-        if "input_ids" in self._onnx_input_names:
+        inputs = self._build_onnx_inputs(token_ids, voice, speed)
+        if self.settings.onnx_io_binding:
+            return self._run_onnx_audio_iobinding(inputs)
+        return self.session.run(None, inputs)[0]
+
+    def _build_onnx_inputs(
+        self,
+        token_ids: list[int],
+        voice: np.ndarray,
+        speed: float,
+    ) -> dict[str, np.ndarray]:
+        buffers = self._get_onnx_input_buffers()
+        token_count = len(token_ids)
+        buffers.token_ids[0, 0] = 0
+        buffers.token_ids[0, 1 : token_count + 1] = token_ids
+        buffers.token_ids[0, token_count + 1] = 0
+
+        token_input = buffers.token_ids[:, : token_count + 2]
+        style = voice[token_count]
+
+        if self._token_input_name == "input_ids":
+            buffers.speed_int32[0] = speed
             inputs = {
                 "input_ids": token_input,
                 "style": np.array(style, dtype=np.float32),
-                "speed": np.array([speed], dtype=np.int32),
+                "speed": buffers.speed_int32,
             }
         else:
+            buffers.speed_float32[0] = speed
             inputs = {
                 "tokens": token_input,
                 "style": style,
-                "speed": np.ones(1, dtype=np.float32) * speed,
+                "speed": buffers.speed_float32,
             }
 
-        return self.session.run(None, inputs)[0]
+        return inputs
+
+    def _run_onnx_audio_iobinding(self, inputs: dict[str, np.ndarray]) -> np.ndarray:
+        binding = self.session.io_binding()
+        for name, value in inputs.items():
+            binding.bind_cpu_input(name, value)
+        binding.bind_output(self._onnx_output_name)
+        self.session.run_with_iobinding(binding)
+        return binding.copy_outputs_to_cpu()[0]
+
+    def _get_onnx_input_buffers(self) -> OnnxInputBuffers:
+        buffers = getattr(self._onnx_input_buffers, "buffers", None)
+        if buffers is None:
+            buffers = OnnxInputBuffers(
+                token_ids=np.zeros((1, MAX_PHONEME_LENGTH + 2), dtype=np.int64),
+                speed_float32=np.ones(1, dtype=np.float32),
+                speed_int32=np.ones(1, dtype=np.int32),
+            )
+            self._onnx_input_buffers.buffers = buffers
+        return buffers
 
     async def create_stream(
         self,

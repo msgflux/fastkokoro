@@ -6,7 +6,6 @@ import statistics
 import time
 from dataclasses import asdict, dataclass
 
-import numpy as np
 from kokoro_onnx import SAMPLE_RATE, trim_audio
 
 from fastkokoro.audio import encode_audio
@@ -134,10 +133,10 @@ def profile_once(
     split_phonemes = time.perf_counter()
     first_batch = phoneme_batches[0] if phoneme_batches else ""
 
-    tokens = np.array(engine.kokoro.tokenizer.tokenize(first_batch), dtype=np.int64)
+    tokens = engine.kokoro.tokenizer.tokenize(first_batch)
     tokenized = time.perf_counter()
 
-    inputs = build_inputs(engine, voice, tokens, speed)
+    inputs = engine._build_onnx_inputs(tokens, engine._voice_styles[voice], speed)
     inputs_built = time.perf_counter()
 
     audio = engine.session.run(None, inputs)[0]
@@ -200,27 +199,6 @@ def profile_once(
         total_seconds=finished - start,
         active_providers=engine.session.get_providers(),
     )
-
-
-def build_inputs(
-    engine: FastKokoro,
-    voice: str,
-    tokens: np.ndarray,
-    speed: float,
-) -> dict[str, object]:
-    style = engine._voice_styles[voice][len(tokens)]
-    token_input = [[0, *tokens, 0]]
-    if "input_ids" in engine._onnx_input_names:
-        return {
-            "input_ids": token_input,
-            "style": np.array(style, dtype=np.float32),
-            "speed": np.array([speed], dtype=np.int32),
-        }
-    return {
-        "tokens": token_input,
-        "style": style,
-        "speed": np.ones(1, dtype=np.float32) * speed,
-    }
 
 
 def summarize(runs: list[StreamingProfileRun]) -> StreamingProfileSummary:

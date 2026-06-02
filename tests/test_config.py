@@ -1,6 +1,7 @@
 from fastkokoro.config import (
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
+    DEFAULT_ONNX_IO_BINDING,
     Settings,
 )
 
@@ -13,6 +14,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS", "4")
     monkeypatch.setenv("FASTKOKORO_ONNX_INTER_OP_NUM_THREADS", "2")
     monkeypatch.setenv("FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL", "extended")
+    monkeypatch.setenv("FASTKOKORO_ONNX_IO_BINDING", "false")
 
     settings = Settings.from_env()
 
@@ -23,6 +25,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_intra_op_num_threads == 4
     assert settings.onnx_inter_op_num_threads == 2
     assert settings.onnx_graph_optimization_level == "extended"
+    assert settings.onnx_io_binding is False
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -39,6 +42,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_graph_optimization_level == (
         DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL
     )
+    assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
 
 
 def test_settings_allows_ort_default_thread_options(monkeypatch):

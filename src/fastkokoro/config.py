@@ -16,6 +16,7 @@ DEFAULT_ONNX_PROVIDERS = ("CPUExecutionProvider",)
 DEFAULT_ONNX_INTRA_OP_NUM_THREADS = min(4, os.cpu_count() or 1)
 DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
 DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL = "all"
+DEFAULT_ONNX_IO_BINDING = True
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
@@ -42,6 +43,7 @@ class Settings:
     onnx_intra_op_num_threads: int | None
     onnx_inter_op_num_threads: int | None
     onnx_graph_optimization_level: str
+    onnx_io_binding: bool
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -87,6 +89,10 @@ class Settings:
                     "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL",
                     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
                 )
+            ),
+            onnx_io_binding=parse_bool(
+                os.getenv("FASTKOKORO_ONNX_IO_BINDING"),
+                default=DEFAULT_ONNX_IO_BINDING,
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
