@@ -61,3 +61,8 @@ The current `kokoro-onnx` stream emits one chunk for these short and medium
 inputs, so time to first chunk is effectively total latency. Sentence-level
 segmentation improves perceived streaming latency by yielding earlier, while
 frame slicing improves playback granularity after the first sentence is ready.
+
+On the local 8-CPU machine used for these measurements, setting
+`FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS=4` and
+`FASTKOKORO_ONNX_INTER_OP_NUM_THREADS=1` reduced short-text p50 latency from
+about 1.59s with ONNX Runtime's default thread settings to about 1.27s.

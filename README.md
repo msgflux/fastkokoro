@@ -125,8 +125,8 @@ Environment variables:
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
-| `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | unset |
-| `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | unset |
+| `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | `min(4, CPU count)` |
+| `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | `1` |
 
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
@@ -137,6 +137,11 @@ time. For `response_format=pcm`, the server also slices each sentence into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
 path directly.
+
+The default ONNX Runtime thread settings prioritize low CPU latency. Set
+`FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` or
+`FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` to an empty value to use ONNX Runtime's
+own defaults.
 
 ## ONNX Runtime Providers
 
@@ -170,6 +175,12 @@ FASTKOKORO_ONNX_PROVIDERS=OpenVINOExecutionProvider,CPUExecutionProvider uv run 
 Set `FASTKOKORO_ONNX_AUTO_PROVIDERS=true` to pass every provider available in the
 installed ONNX Runtime build to the session. Use this mostly for quick local
 experiments; production deployments should pin an explicit provider order.
+
+For latency tuning, run:
+
+```bash
+uv run python scripts/benchmark_latency.py --text short --iterations 5 --warmup
+```
 
 ## API
 

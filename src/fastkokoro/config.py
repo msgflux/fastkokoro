@@ -13,6 +13,8 @@ DEFAULT_LANG = "en-us"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8880
 DEFAULT_ONNX_PROVIDERS = ("CPUExecutionProvider",)
+DEFAULT_ONNX_INTRA_OP_NUM_THREADS = min(4, os.cpu_count() or 1)
+DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
@@ -66,10 +68,16 @@ class Settings:
             onnx_providers=parse_csv(providers) or DEFAULT_ONNX_PROVIDERS,
             onnx_auto_providers=parse_bool(os.getenv("FASTKOKORO_ONNX_AUTO_PROVIDERS")),
             onnx_intra_op_num_threads=parse_optional_int(
-                os.getenv("FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS")
+                os.getenv(
+                    "FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS",
+                    str(DEFAULT_ONNX_INTRA_OP_NUM_THREADS),
+                )
             ),
             onnx_inter_op_num_threads=parse_optional_int(
-                os.getenv("FASTKOKORO_ONNX_INTER_OP_NUM_THREADS")
+                os.getenv(
+                    "FASTKOKORO_ONNX_INTER_OP_NUM_THREADS",
+                    str(DEFAULT_ONNX_INTER_OP_NUM_THREADS),
+                )
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
