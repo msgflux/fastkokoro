@@ -5,8 +5,8 @@ Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
 `fastkokoro` runs the 82M-parameter Kokoro text-to-speech model with low startup
 overhead, fast local inference, and a small dependency footprint. It supports CPU
 and GPU execution through ONNX Runtime providers, including CUDA, TensorRT, and
-OpenVINO when the matching runtime package is installed. The default model is
-NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
+other providers when the matching runtime package is installed. The default
+model is NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
 
 The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
 once into the `.npz` voice format expected by `kokoro-onnx`, so the default model
@@ -87,9 +87,15 @@ Published tags:
 | Tag | Description |
 | --- | --- |
 | `cpu`, `latest-cpu` | Latest CPU image |
-| `gpu`, `latest-gpu` | Latest GPU image |
+| `gpu`, `latest-gpu` | Alias for the latest CUDA 12.6/cuDNN9 GPU image |
+| `gpu-cuda12.6-cudnn9`, `latest-gpu-cuda12.6-cudnn9` | Latest CUDA 12.6/cuDNN9 GPU image |
+| `gpu-legacy`, `latest-gpu-legacy` | Alias for the CUDA 11.8/cuDNN8 GPU image |
+| `gpu-cuda11.8-cudnn8`, `latest-gpu-cuda11.8-cudnn8` | Latest CUDA 11.8/cuDNN8 GPU image |
 | `0.2.0-cpu`, `0.2-cpu` | Versioned CPU image |
-| `0.2.0-gpu`, `0.2-gpu` | Versioned GPU image |
+| `0.2.0-gpu`, `0.2-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
+| `0.2.0-gpu-cuda12.6-cudnn9`, `0.2-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
+| `0.2.0-gpu-legacy`, `0.2-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
+| `0.2.0-gpu-cuda11.8-cudnn8`, `0.2-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
 
 Build and run the CPU image locally:
 
@@ -103,6 +109,14 @@ Build and run the GPU image locally:
 ```bash
 docker build -f Dockerfile.gpu -t fastkokoro:gpu .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu
+```
+
+For older NVIDIA drivers or GPUs that do not work with the current CUDA 12
+image, build the CUDA 11.8/cuDNN8 legacy image:
+
+```bash
+docker build -f Dockerfile.gpu-legacy -t fastkokoro:gpu-legacy .
+docker run --gpus all -p 8880:8880 fastkokoro:gpu-legacy
 ```
 
 Environment variables:
@@ -121,21 +135,34 @@ Environment variables:
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `hello` |
-| `FASTKOKORO_STREAM_STRATEGY` | `sentence` |
+| `FASTKOKORO_STREAM_STRATEGY` | `chunk` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `32` |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | `2` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
 | `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | `min(4, CPU count)` |
 | `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | `1` |
+| `FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL` | `all` |
+| `FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL` | `3` |
+| `FASTKOKORO_ONNX_IO_BINDING` | `true` |
+| `FASTKOKORO_ONNX_IO_BINDING_DEVICE` | `auto` |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS` | unset; disabled |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE` | `128` |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL` | `4` |
+| `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
 
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
-`FASTKOKORO_STREAM_STRATEGY=sentence` streams by synthesizing one sentence at a
-time. Set `FASTKOKORO_STREAM_STRATEGY=phrase` for lower time to first chunk by
-splitting on phrase punctuation such as commas, semicolons, and question marks.
-For `response_format=pcm`, the server also slices each generated segment into
+`FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
+possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
+`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default is intentionally small, up to
+2 words or 32 characters per model call, to favor low TTFC for interactive
+clients. `phrase` splits only on phrase punctuation such as commas, semicolons,
+and question marks. `sentence` synthesizes one sentence at a time. For
+`response_format=pcm`, the server also slices each generated segment into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
 path directly.
@@ -144,6 +171,12 @@ The default ONNX Runtime thread settings prioritize low CPU latency. Set
 `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` or
 `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` to an empty value to use ONNX Runtime's
 own defaults.
+
+Set `FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS=4` or
+`FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS=8` to generate a MatMul weight-only
+quantized ONNX model on startup. The generated model is cached under
+`FASTKOKORO_CACHE_DIR/quantized` and reused on later starts with the same
+settings.
 
 ## ONNX Runtime Providers
 
@@ -166,12 +199,6 @@ TensorRT with CUDA and CPU fallback:
 
 ```bash
 FASTKOKORO_ONNX_PROVIDERS=TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
-```
-
-Intel/OpenVINO builds can use:
-
-```bash
-FASTKOKORO_ONNX_PROVIDERS=OpenVINOExecutionProvider,CPUExecutionProvider uv run fastkokoro
 ```
 
 Set `FASTKOKORO_ONNX_AUTO_PROVIDERS=true` to pass every provider available in the

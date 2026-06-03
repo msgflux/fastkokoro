@@ -11,7 +11,12 @@ import numpy as np
 
 from fastkokoro.audio import encode_audio
 from fastkokoro.engine import FastKokoro
-from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
+from fastkokoro.streaming import (
+    split_pcm_frames,
+    split_phrases,
+    split_scheduled_chunks,
+    split_sentences,
+)
 
 TEXTS = {
     "short": "Ola, tudo bem?",
@@ -82,6 +87,20 @@ async def main() -> None:
                 text_name,
                 text,
                 framed_phrase_segment_stream(
+                    engine,
+                    text,
+                    args.voice,
+                    args.lang,
+                    args.speed,
+                    args.audio_frame_ms,
+                ),
+                engine,
+            ),
+            await measure(
+                f"chunk_segments_{args.audio_frame_ms}ms_frames",
+                text_name,
+                text,
+                framed_chunk_segment_stream(
                     engine,
                     text,
                     args.voice,
@@ -189,6 +208,33 @@ async def framed_phrase_segment_stream(
     frame_ms: int,
 ) -> AsyncGenerator[bytes, None]:
     for segment in split_phrases(text):
+        audio = engine.create(
+            segment,
+            voice=voice,
+            lang=lang,
+            speed=speed,
+            response_format="pcm",
+        )
+        for frame in split_pcm_frames(audio, frame_ms):
+            yield frame
+
+
+async def framed_chunk_segment_stream(
+    engine: FastKokoro,
+    text: str,
+    voice: str,
+    lang: str,
+    speed: float,
+    frame_ms: int,
+) -> AsyncGenerator[bytes, None]:
+    max_chars, max_words = engine._stream_schedule_limits()
+    for segment in split_scheduled_chunks(
+        text,
+        initial_max_chars=engine.settings.stream_max_segment_chars,
+        initial_max_words=engine.settings.stream_max_segment_words,
+        max_chars=max_chars,
+        max_words=max_words,
+    ):
         audio = engine.create(
             segment,
             voice=voice,

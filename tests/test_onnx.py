@@ -24,10 +24,24 @@ def _settings(**overrides):
         onnx_auto_providers=False,
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
+        onnx_graph_optimization_level="all",
+        onnx_log_severity_level=3,
+        onnx_io_binding=False,
+        onnx_io_binding_device="auto",
+        onnx_weight_only_nbits=None,
+        onnx_weight_only_block_size=128,
+        onnx_weight_only_accuracy_level=4,
+        onnx_weight_only_symmetric=True,
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
         stream_audio_frame_ms=200,
+        stream_max_segment_chars=80,
+        stream_max_segment_words=12,
+        stream_schedule_max_segment_chars=96,
+        stream_schedule_max_segment_words=12,
+        stream_cpu_schedule_max_segment_chars=48,
+        stream_cpu_schedule_max_segment_words=4,
     )
     values.update(overrides)
     return Settings(**values)
@@ -104,3 +118,39 @@ def test_create_session_applies_thread_options():
     session_options = init.call_args.kwargs["sess_options"]
     assert session_options.intra_op_num_threads == 4
     assert session_options.inter_op_num_threads == 2
+
+
+def test_create_session_applies_graph_optimization_level():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(onnx_graph_optimization_level="extended"),
+        )
+
+    session_options = init.call_args.kwargs["sess_options"]
+    assert session_options.graph_optimization_level.name == "ORT_ENABLE_EXTENDED"
+
+
+def test_create_session_applies_log_severity_level():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.set_default_logger_severity") as set_severity,
+        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(onnx_log_severity_level=3),
+        )
+
+    session_options = init.call_args.kwargs["sess_options"]
+    assert session_options.log_severity_level == 3
+    set_severity.assert_called_once_with(3)

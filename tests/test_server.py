@@ -67,6 +67,21 @@ def test_speech_non_streaming():
 
     assert response.status_code == 200
     assert response.content == b"audio"
+
+
+def test_speech_defaults_to_pcm_response_format():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "kokoro",
+            "input": "hello",
+            "voice": "af_heart",
+        },
+    )
+
+    assert response.status_code == 200
     assert response.headers["content-type"].startswith("audio/pcm")
 
 

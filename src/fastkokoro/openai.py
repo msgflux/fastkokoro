@@ -12,7 +12,7 @@ class SpeechRequest(BaseModel):
     model: str = "kokoro"
     input: str = Field(min_length=1)
     voice: str = "af_heart"
-    response_format: AudioFormat = "mp3"
+    response_format: AudioFormat = "pcm"
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     stream: bool | None = None
     lang: str | None = None

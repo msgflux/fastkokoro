@@ -21,9 +21,14 @@ jobs:
       matrix:
         include:
           - variant: cpu
+            alias: cpu
             dockerfile: Dockerfile.cpu
-          - variant: gpu
+          - variant: gpu-cuda12.6-cudnn9
+            alias: gpu
             dockerfile: Dockerfile.gpu
+          - variant: gpu-cuda11.8-cudnn8
+            alias: gpu-legacy
+            dockerfile: Dockerfile.gpu-legacy
 
     steps:
       - name: Checkout
@@ -65,6 +70,10 @@ jobs:
             type=raw,value=latest-${{ matrix.variant }}
             type=raw,value=${{ steps.version.outputs.value }}-${{ matrix.variant }}
             type=raw,value=${{ steps.version.outputs.major_minor }}-${{ matrix.variant }}
+            type=raw,value=${{ matrix.alias }}
+            type=raw,value=latest-${{ matrix.alias }}
+            type=raw,value=${{ steps.version.outputs.value }}-${{ matrix.alias }}
+            type=raw,value=${{ steps.version.outputs.major_minor }}-${{ matrix.alias }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
