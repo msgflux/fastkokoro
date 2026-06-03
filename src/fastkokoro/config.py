@@ -23,10 +23,16 @@ DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
 DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
 DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_WARMUP_TEXT = "hello"
-DEFAULT_STREAM_STRATEGY = "phrase"
+DEFAULT_STREAM_STRATEGY = "chunk"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
+DEFAULT_STREAM_MAX_SEGMENT_CHARS = 32
+DEFAULT_STREAM_MAX_SEGMENT_WORDS = 2
+DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
+DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS = 12
+DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS = 48
+DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS = 4
 SAMPLE_RATE = 24000
-STREAM_STRATEGIES = {"kokoro", "phrase", "sentence"}
+STREAM_STRATEGIES = {"chunk", "kokoro", "phrase", "sentence"}
 ONNX_GRAPH_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
 ONNX_IO_BINDING_DEVICES = {"auto", "cpu", "cuda"}
 ONNX_WEIGHT_ONLY_NBITS = {4, 8}
@@ -60,6 +66,12 @@ class Settings:
     warmup_text: str
     stream_strategy: str
     stream_audio_frame_ms: int
+    stream_max_segment_chars: int
+    stream_max_segment_words: int
+    stream_schedule_max_segment_chars: int
+    stream_schedule_max_segment_words: int
+    stream_cpu_schedule_max_segment_chars: int
+    stream_cpu_schedule_max_segment_words: int
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -144,6 +156,48 @@ class Settings:
                     str(DEFAULT_STREAM_AUDIO_FRAME_MS),
                 ),
                 name="FASTKOKORO_STREAM_AUDIO_FRAME_MS",
+            ),
+            stream_max_segment_chars=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_MAX_SEGMENT_CHARS",
+                    str(DEFAULT_STREAM_MAX_SEGMENT_CHARS),
+                ),
+                name="FASTKOKORO_STREAM_MAX_SEGMENT_CHARS",
+            ),
+            stream_max_segment_words=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_MAX_SEGMENT_WORDS",
+                    str(DEFAULT_STREAM_MAX_SEGMENT_WORDS),
+                ),
+                name="FASTKOKORO_STREAM_MAX_SEGMENT_WORDS",
+            ),
+            stream_schedule_max_segment_chars=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_CHARS",
+                    str(DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS),
+                ),
+                name="FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_CHARS",
+            ),
+            stream_schedule_max_segment_words=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS",
+                    str(DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS),
+                ),
+                name="FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS",
+            ),
+            stream_cpu_schedule_max_segment_chars=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS",
+                    str(DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS),
+                ),
+                name="FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS",
+            ),
+            stream_cpu_schedule_max_segment_words=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS",
+                    str(DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS),
+                ),
+                name="FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS",
             ),
         )
 

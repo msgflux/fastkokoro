@@ -37,6 +37,12 @@ def _settings(**overrides):
         warmup_text="hello",
         stream_strategy="sentence",
         stream_audio_frame_ms=1,
+        stream_max_segment_chars=80,
+        stream_max_segment_words=12,
+        stream_schedule_max_segment_chars=96,
+        stream_schedule_max_segment_words=12,
+        stream_cpu_schedule_max_segment_chars=48,
+        stream_cpu_schedule_max_segment_words=4,
     )
     values.update(overrides)
     return Settings(**values)
@@ -98,6 +104,15 @@ def _engine(settings):
     return engine
 
 
+def _set_providers(engine, providers):
+    engine.session = SimpleNamespace(
+        get_providers=lambda: providers,
+        get_inputs=lambda: [SimpleNamespace(name="tokens")],
+        get_outputs=lambda: [SimpleNamespace(name="audio")],
+        run=lambda output_names, inputs: [np.ones(48, dtype=np.float32)],
+    )
+
+
 @pytest.mark.asyncio
 async def test_sentence_stream_splits_text_and_pcm_frames():
     engine = _engine(_settings(stream_strategy="sentence", stream_audio_frame_ms=1))
@@ -150,6 +165,108 @@ async def test_phrase_stream_splits_text_on_commas():
     ]
 
     assert engine.kokoro.created_texts == ["Hello,", "World."]
+
+
+@pytest.mark.asyncio
+async def test_chunk_stream_limits_segment_size():
+    engine = _engine(
+        _settings(
+            stream_strategy="chunk",
+            stream_audio_frame_ms=1,
+            stream_max_segment_chars=80,
+            stream_max_segment_words=2,
+            stream_schedule_max_segment_chars=80,
+            stream_schedule_max_segment_words=2,
+            stream_cpu_schedule_max_segment_chars=80,
+            stream_cpu_schedule_max_segment_words=2,
+        )
+    )
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            "one two three four five",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert engine.kokoro.created_texts == ["one two", "three four", "five"]
+
+
+@pytest.mark.asyncio
+async def test_chunk_stream_uses_cpu_schedule_limits():
+    engine = _engine(
+        _settings(
+            stream_strategy="chunk",
+            stream_audio_frame_ms=1,
+            stream_max_segment_chars=80,
+            stream_max_segment_words=2,
+            stream_schedule_max_segment_chars=96,
+            stream_schedule_max_segment_words=12,
+            stream_cpu_schedule_max_segment_chars=80,
+            stream_cpu_schedule_max_segment_words=4,
+        )
+    )
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            (
+                "one two three four five six seven eight nine ten "
+                "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen"
+            ),
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert engine.kokoro.created_texts == [
+        "one two",
+        "three four five six",
+        "seven eight nine ten",
+        "eleven twelve thirteen fourteen",
+        "fifteen sixteen seventeen eighteen",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chunk_stream_uses_gpu_schedule_limits():
+    engine = _engine(
+        _settings(
+            stream_strategy="chunk",
+            stream_audio_frame_ms=1,
+            stream_max_segment_chars=80,
+            stream_max_segment_words=2,
+            stream_schedule_max_segment_chars=96,
+            stream_schedule_max_segment_words=12,
+            stream_cpu_schedule_max_segment_chars=80,
+            stream_cpu_schedule_max_segment_words=4,
+        )
+    )
+    _set_providers(engine, ["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            (
+                "one two three four five six seven eight nine ten "
+                "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen"
+            ),
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert engine.kokoro.created_texts == [
+        "one two",
+        "three four five six",
+        "seven eight nine ten eleven twelve thirteen fourteen",
+        "fifteen sixteen seventeen eighteen",
+    ]
 
 
 def test_create_uses_cached_onnx_input_names():

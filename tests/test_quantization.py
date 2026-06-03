@@ -33,6 +33,12 @@ def _settings(**overrides):
         warmup_text="hello",
         stream_strategy="sentence",
         stream_audio_frame_ms=200,
+        stream_max_segment_chars=80,
+        stream_max_segment_words=12,
+        stream_schedule_max_segment_chars=96,
+        stream_schedule_max_segment_words=12,
+        stream_cpu_schedule_max_segment_chars=48,
+        stream_cpu_schedule_max_segment_words=4,
     )
     values.update(overrides)
     return Settings(**values)

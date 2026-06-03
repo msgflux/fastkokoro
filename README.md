@@ -105,6 +105,14 @@ docker build -f Dockerfile.gpu -t fastkokoro:gpu .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu
 ```
 
+For older NVIDIA drivers or GPUs that do not work with the current CUDA 12
+image, build the CUDA 11.8/cuDNN8 legacy image:
+
+```bash
+docker build -f Dockerfile.gpu-legacy -t fastkokoro:gpu-legacy .
+docker run --gpus all -p 8880:8880 fastkokoro:gpu-legacy
+```
+
 Environment variables:
 
 | Variable | Default |
@@ -121,8 +129,10 @@ Environment variables:
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `hello` |
-| `FASTKOKORO_STREAM_STRATEGY` | `phrase` |
+| `FASTKOKORO_STREAM_STRATEGY` | `chunk` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `32` |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | `2` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
 | `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | `min(4, CPU count)` |
@@ -139,9 +149,12 @@ Environment variables:
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
-`FASTKOKORO_STREAM_STRATEGY=phrase` streams by splitting on phrase punctuation
-such as commas, semicolons, and question marks. Set
-`FASTKOKORO_STREAM_STRATEGY=sentence` to synthesize one sentence at a time. For
+`FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
+possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
+`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default is intentionally small, up to
+2 words or 32 characters per model call, to favor low TTFC for interactive
+clients. `phrase` splits only on phrase punctuation such as commas, semicolons,
+and question marks. `sentence` synthesizes one sentence at a time. For
 `response_format=pcm`, the server also slices each generated segment into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming

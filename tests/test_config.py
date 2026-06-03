@@ -21,6 +21,12 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE", "64")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC", "false")
+    monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS", "40")
+    monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS", "6")
+    monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_CHARS", "120")
+    monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS", "10")
+    monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS", "56")
+    monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS", "4")
 
     settings = Settings.from_env()
 
@@ -37,6 +43,12 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_weight_only_block_size == 64
     assert settings.onnx_weight_only_accuracy_level == 2
     assert settings.onnx_weight_only_symmetric is False
+    assert settings.stream_max_segment_chars == 40
+    assert settings.stream_max_segment_words == 6
+    assert settings.stream_schedule_max_segment_chars == 120
+    assert settings.stream_schedule_max_segment_words == 10
+    assert settings.stream_cpu_schedule_max_segment_chars == 56
+    assert settings.stream_cpu_schedule_max_segment_words == 4
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -56,7 +68,13 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
     assert settings.onnx_io_binding_device == DEFAULT_ONNX_IO_BINDING_DEVICE
     assert settings.onnx_weight_only_nbits is None
-    assert settings.stream_strategy == "phrase"
+    assert settings.stream_strategy == "chunk"
+    assert settings.stream_max_segment_chars == 32
+    assert settings.stream_max_segment_words == 2
+    assert settings.stream_schedule_max_segment_chars == 96
+    assert settings.stream_schedule_max_segment_words == 12
+    assert settings.stream_cpu_schedule_max_segment_chars == 48
+    assert settings.stream_cpu_schedule_max_segment_words == 4
 
 
 def test_settings_allows_ort_default_thread_options(monkeypatch):
@@ -78,12 +96,12 @@ def test_settings_parses_auto_providers(monkeypatch):
 
 
 def test_settings_parses_stream_options(monkeypatch):
-    monkeypatch.setenv("FASTKOKORO_STREAM_STRATEGY", "kokoro")
+    monkeypatch.setenv("FASTKOKORO_STREAM_STRATEGY", "chunk")
     monkeypatch.setenv("FASTKOKORO_STREAM_AUDIO_FRAME_MS", "80")
 
     settings = Settings.from_env()
 
-    assert settings.stream_strategy == "kokoro"
+    assert settings.stream_strategy == "chunk"
     assert settings.stream_audio_frame_ms == 80
 
 

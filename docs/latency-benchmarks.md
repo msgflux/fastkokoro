@@ -27,6 +27,7 @@ uv run python scripts/benchmark_latency.py --text short --iterations 5 --warmup 
 Compare streaming segmentation strategies:
 
 ```bash
+FASTKOKORO_STREAM_STRATEGY=chunk uv run python scripts/benchmark_latency.py --text medium --iterations 3 --warmup
 FASTKOKORO_STREAM_STRATEGY=sentence uv run python scripts/benchmark_latency.py --text medium --iterations 3 --warmup
 FASTKOKORO_STREAM_STRATEGY=phrase uv run python scripts/benchmark_latency.py --text medium --iterations 3 --warmup
 ```
@@ -59,6 +60,7 @@ count)` and `inter_op=1`. These settings favor low single-request latency. Set
 `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` explicitly for hardware-specific tuning,
 or set them to empty values to use ONNX Runtime's own defaults.
 
-`stream_phrase` is the lowest-latency CPU option in these local measurements and
-is appropriate for interactive clients that value TTFC. It can increase total
-generation time because more model calls are made.
+`stream_chunk` is the default latency-oriented option. It keeps the low TTFC
+profile of `stream_phrase` while also enforcing word and character limits for
+long text without useful punctuation. It can increase total generation time
+because more model calls are made.

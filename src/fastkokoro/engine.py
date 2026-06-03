@@ -15,7 +15,12 @@ from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
 from fastkokoro.quantization import resolve_quantized_model_path
-from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
+from fastkokoro.streaming import (
+    split_pcm_frames,
+    split_phrases,
+    split_scheduled_chunks,
+    split_sentences,
+)
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
@@ -275,7 +280,16 @@ class FastKokoro:
                 )
             return
 
-        if self.settings.stream_strategy == "phrase":
+        if self.settings.stream_strategy == "chunk":
+            max_chars, max_words = self._stream_schedule_limits()
+            segments = split_scheduled_chunks(
+                text,
+                initial_max_chars=self.settings.stream_max_segment_chars,
+                initial_max_words=self.settings.stream_max_segment_words,
+                max_chars=max_chars,
+                max_words=max_words,
+            )
+        elif self.settings.stream_strategy == "phrase":
             segments = split_phrases(text)
         else:
             segments = split_sentences(text)
@@ -297,6 +311,18 @@ class FastKokoro:
                 self.settings.stream_audio_frame_ms,
             ):
                 yield frame
+
+    def _stream_schedule_limits(self) -> tuple[int, int]:
+        providers = set(self.session.get_providers())
+        if {"CUDAExecutionProvider", "TensorrtExecutionProvider"} & providers:
+            return (
+                self.settings.stream_schedule_max_segment_chars,
+                self.settings.stream_schedule_max_segment_words,
+            )
+        return (
+            self.settings.stream_cpu_schedule_max_segment_chars,
+            self.settings.stream_cpu_schedule_max_segment_words,
+        )
 
 
 def split_phonemes_for_model(phonemes: str) -> list[str]:

@@ -10,7 +10,12 @@ from kokoro_onnx import SAMPLE_RATE, trim_audio
 
 from fastkokoro.audio import encode_audio
 from fastkokoro.engine import FastKokoro, split_phonemes_for_model
-from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
+from fastkokoro.streaming import (
+    split_pcm_frames,
+    split_phrases,
+    split_scheduled_chunks,
+    split_sentences,
+)
 
 TEXTS = {
     "tiny": "Ola.",
@@ -80,7 +85,11 @@ def main() -> None:
     parser.add_argument("--lang", default="p")
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--text", choices=TEXTS, default="short")
-    parser.add_argument("--strategy", choices=("phrase", "sentence"), default="phrase")
+    parser.add_argument(
+        "--strategy",
+        choices=("chunk", "phrase", "sentence"),
+        default="phrase",
+    )
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--json-lines", action="store_true")
@@ -122,7 +131,19 @@ def profile_once(
     voice, resolved_lang = engine.resolve_request(voice_name, lang)
     resolved = time.perf_counter()
 
-    segments = split_phrases(text) if strategy == "phrase" else split_sentences(text)
+    if strategy == "chunk":
+        max_chars, max_words = engine._stream_schedule_limits()
+        segments = split_scheduled_chunks(
+            text,
+            initial_max_chars=engine.settings.stream_max_segment_chars,
+            initial_max_words=engine.settings.stream_max_segment_words,
+            max_chars=max_chars,
+            max_words=max_words,
+        )
+    elif strategy == "phrase":
+        segments = split_phrases(text)
+    else:
+        segments = split_sentences(text)
     split_text = time.perf_counter()
     first_segment = segments[0] if segments else ""
 

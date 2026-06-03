@@ -1,0 +1,51 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+ENV DEBIAN_FRONTEND=noninteractive
+ENV FASTKOKORO_LEGACY_ORT_GPU_VERSION=1.18.1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+
+RUN uv sync --frozen --no-dev \
+    && uv pip uninstall onnxruntime onnxruntime-gpu \
+    && uv pip install "onnxruntime-gpu==${FASTKOKORO_LEGACY_ORT_GPU_VERSION}"
+
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS runtime
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV FASTKOKORO_HOST=0.0.0.0
+ENV FASTKOKORO_PORT=8880
+ENV FASTKOKORO_CACHE_DIR=/models
+ENV FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app /app
+
+EXPOSE 8880
+VOLUME ["/models"]
+
+CMD ["fastkokoro"]
