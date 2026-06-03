@@ -87,11 +87,15 @@ Published tags:
 | Tag | Description |
 | --- | --- |
 | `cpu`, `latest-cpu` | Latest CPU image |
-| `gpu`, `latest-gpu` | Latest GPU image |
-| `gpu-legacy`, `latest-gpu-legacy` | Latest CUDA 11.8/cuDNN8 GPU image |
+| `gpu`, `latest-gpu` | Alias for the latest CUDA 12.6/cuDNN9 GPU image |
+| `gpu-cuda12.6-cudnn9`, `latest-gpu-cuda12.6-cudnn9` | Latest CUDA 12.6/cuDNN9 GPU image |
+| `gpu-legacy`, `latest-gpu-legacy` | Alias for the CUDA 11.8/cuDNN8 GPU image |
+| `gpu-cuda11.8-cudnn8`, `latest-gpu-cuda11.8-cudnn8` | Latest CUDA 11.8/cuDNN8 GPU image |
 | `0.2.0-cpu`, `0.2-cpu` | Versioned CPU image |
-| `0.2.0-gpu`, `0.2-gpu` | Versioned GPU image |
-| `0.2.0-gpu-legacy`, `0.2-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image |
+| `0.2.0-gpu`, `0.2-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
+| `0.2.0-gpu-cuda12.6-cudnn9`, `0.2-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
+| `0.2.0-gpu-legacy`, `0.2-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
+| `0.2.0-gpu-cuda11.8-cudnn8`, `0.2-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
 
 Build and run the CPU image locally:
 
