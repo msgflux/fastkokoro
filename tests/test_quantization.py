@@ -23,6 +23,7 @@ def _settings(**overrides):
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
         onnx_graph_optimization_level="all",
+        onnx_log_severity_level=3,
         onnx_io_binding=False,
         onnx_io_binding_device="auto",
         onnx_weight_only_nbits=None,

@@ -29,10 +29,12 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
             f"{', '.join(missing)}. Available providers: {', '.join(available)}"
         )
 
+    ort.set_default_logger_severity(settings.onnx_log_severity_level)
     session_options = ort.SessionOptions()
     session_options.graph_optimization_level = GRAPH_OPTIMIZATION_LEVELS[
         settings.onnx_graph_optimization_level
     ]
+    session_options.log_severity_level = settings.onnx_log_severity_level
     if settings.onnx_intra_op_num_threads is not None:
         session_options.intra_op_num_threads = settings.onnx_intra_op_num_threads
     if settings.onnx_inter_op_num_threads is not None:

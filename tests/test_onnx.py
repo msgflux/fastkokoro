@@ -25,6 +25,7 @@ def _settings(**overrides):
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
         onnx_graph_optimization_level="all",
+        onnx_log_severity_level=3,
         onnx_io_binding=False,
         onnx_io_binding_device="auto",
         onnx_weight_only_nbits=None,
@@ -134,3 +135,22 @@ def test_create_session_applies_graph_optimization_level():
 
     session_options = init.call_args.kwargs["sess_options"]
     assert session_options.graph_optimization_level.name == "ORT_ENABLE_EXTENDED"
+
+
+def test_create_session_applies_log_severity_level():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.set_default_logger_severity") as set_severity,
+        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(onnx_log_severity_level=3),
+        )
+
+    session_options = init.call_args.kwargs["sess_options"]
+    assert session_options.log_severity_level == 3
+    set_severity.assert_called_once_with(3)

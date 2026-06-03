@@ -21,6 +21,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE", "64")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC", "false")
+    monkeypatch.setenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS", "40")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS", "6")
     monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_CHARS", "120")
@@ -43,6 +44,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_weight_only_block_size == 64
     assert settings.onnx_weight_only_accuracy_level == 2
     assert settings.onnx_weight_only_symmetric is False
+    assert settings.onnx_log_severity_level == 2
     assert settings.stream_max_segment_chars == 40
     assert settings.stream_max_segment_words == 6
     assert settings.stream_schedule_max_segment_chars == 120
@@ -65,6 +67,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_graph_optimization_level == (
         DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL
     )
+    assert settings.onnx_log_severity_level == 3
     assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
     assert settings.onnx_io_binding_device == DEFAULT_ONNX_IO_BINDING_DEVICE
     assert settings.onnx_weight_only_nbits is None

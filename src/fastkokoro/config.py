@@ -16,6 +16,7 @@ DEFAULT_ONNX_PROVIDERS = ("CPUExecutionProvider",)
 DEFAULT_ONNX_INTRA_OP_NUM_THREADS = min(4, os.cpu_count() or 1)
 DEFAULT_ONNX_INTER_OP_NUM_THREADS = 1
 DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL = "all"
+DEFAULT_ONNX_LOG_SEVERITY_LEVEL = 3
 DEFAULT_ONNX_IO_BINDING = True
 DEFAULT_ONNX_IO_BINDING_DEVICE = "auto"
 DEFAULT_ONNX_WEIGHT_ONLY_NBITS = None
@@ -56,6 +57,7 @@ class Settings:
     onnx_intra_op_num_threads: int | None
     onnx_inter_op_num_threads: int | None
     onnx_graph_optimization_level: str
+    onnx_log_severity_level: int
     onnx_io_binding: bool
     onnx_io_binding_device: str
     onnx_weight_only_nbits: int | None
@@ -112,6 +114,12 @@ class Settings:
                 os.getenv(
                     "FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL",
                     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
+                )
+            ),
+            onnx_log_severity_level=parse_onnx_log_severity_level(
+                os.getenv(
+                    "FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL",
+                    str(DEFAULT_ONNX_LOG_SEVERITY_LEVEL),
                 )
             ),
             onnx_io_binding=parse_bool(
@@ -253,6 +261,13 @@ def parse_onnx_graph_optimization_level(value: str) -> str:
         raise ValueError(
             f"FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL must be one of: {choices}"
         )
+    return parsed
+
+
+def parse_onnx_log_severity_level(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0 or parsed > 4:
+        raise ValueError("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL must be between 0 and 4")
     return parsed
 
 
