@@ -88,8 +88,10 @@ Published tags:
 | --- | --- |
 | `cpu`, `latest-cpu` | Latest CPU image |
 | `gpu`, `latest-gpu` | Latest GPU image |
+| `gpu-legacy`, `latest-gpu-legacy` | Latest CUDA 11.8/cuDNN8 GPU image |
 | `0.2.0-cpu`, `0.2-cpu` | Versioned CPU image |
 | `0.2.0-gpu`, `0.2-gpu` | Versioned GPU image |
+| `0.2.0-gpu-legacy`, `0.2-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image |
 
 Build and run the CPU image locally:
 

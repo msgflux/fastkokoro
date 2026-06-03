@@ -24,6 +24,8 @@ jobs:
             dockerfile: Dockerfile.cpu
           - variant: gpu
             dockerfile: Dockerfile.gpu
+          - variant: gpu-legacy
+            dockerfile: Dockerfile.gpu-legacy
 
     steps:
       - name: Checkout
