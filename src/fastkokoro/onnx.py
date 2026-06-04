@@ -22,6 +22,8 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
     providers = (
         available if settings.onnx_auto_providers else list(settings.onnx_providers)
     )
+    if settings.onnx_adain_fusion:
+        _validate_adain_fusion_providers(providers)
     missing = [provider for provider in providers if provider not in available]
     if missing:
         raise ValueError(
@@ -39,6 +41,11 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
         session_options.intra_op_num_threads = settings.onnx_intra_op_num_threads
     if settings.onnx_inter_op_num_threads is not None:
         session_options.inter_op_num_threads = settings.onnx_inter_op_num_threads
+    if settings.onnx_adain_fusion:
+        assert settings.onnx_adain_custom_op_library is not None
+        session_options.register_custom_ops_library(
+            str(settings.onnx_adain_custom_op_library)
+        )
 
     session = ort.InferenceSession(
         str(model_path),
@@ -55,3 +62,12 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
         settings.onnx_graph_optimization_level,
     )
     return session
+
+
+def _validate_adain_fusion_providers(providers: list[str]) -> None:
+    if providers != ["CPUExecutionProvider"]:
+        raise ValueError(
+            "FASTKOKORO_ONNX_ADAIN_FUSION is currently supported only with "
+            "CPUExecutionProvider. Custom AdaIN runs as a CPU custom op and can "
+            "cause provider copies or regressions with GPU/OpenVINO providers."
+        )

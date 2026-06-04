@@ -1,8 +1,9 @@
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 from fastkokoro.config import Settings
-from fastkokoro.quantization import resolve_quantized_model_path
+from fastkokoro.graph_fusion import resolve_adain_fused_model_path
 
 
 def _settings(**overrides):
@@ -48,43 +49,34 @@ def _settings(**overrides):
     return Settings(**values)
 
 
-def test_resolve_quantized_model_path_returns_original_when_disabled():
-    model_path = Path("/models/kokoro.onnx")
+def test_resolve_adain_fused_model_path_returns_original_when_disabled():
+    model_path = Path("/tmp/model.onnx")
 
-    result = resolve_quantized_model_path(model_path, _settings())
-
-    assert result == model_path
+    assert resolve_adain_fused_model_path(model_path, _settings()) == model_path
 
 
-def test_resolve_quantized_model_path_uses_cached_model(tmp_path):
-    model_path = tmp_path / "kokoro.onnx"
-    model_path.touch()
-    settings = _settings(cache_dir=tmp_path, onnx_weight_only_nbits=8)
-    expected = tmp_path / "quantized" / "kokoro-matmul-nbits8-b128-acc4-sym.onnx"
-    expected.parent.mkdir()
-    expected.touch()
-
-    with patch("fastkokoro.quantization._quantize_matmul_nbits") as quantize:
-        result = resolve_quantized_model_path(model_path, settings)
-
-    assert result == expected
-    assert not quantize.called
+def test_resolve_adain_fused_model_path_requires_custom_op_library():
+    with pytest.raises(ValueError, match="ADAIN_CUSTOM_OP_LIBRARY"):
+        resolve_adain_fused_model_path(
+            Path("/tmp/model.onnx"),
+            _settings(onnx_adain_fusion=True),
+        )
 
 
-def test_resolve_quantized_model_path_generates_missing_model(tmp_path):
-    model_path = tmp_path / "kokoro.onnx"
-    model_path.touch()
-    settings = _settings(cache_dir=tmp_path, onnx_weight_only_nbits=4)
+def test_resolve_adain_fused_model_path_uses_explicit_model(tmp_path):
+    custom_op_library = tmp_path / "libfastkokoro_adain.so"
+    adain_model = tmp_path / "model.adain.onnx"
+    custom_op_library.touch()
+    adain_model.touch()
 
-    def fake_quantize(_model_path, output_path, _settings):
-        output_path.touch()
-
-    with patch(
-        "fastkokoro.quantization._quantize_matmul_nbits",
-        side_effect=fake_quantize,
-    ) as quantize:
-        result = resolve_quantized_model_path(model_path, settings)
-
-    assert result.exists()
-    assert result.name == "kokoro-matmul-nbits4-b128-acc4-sym.onnx"
-    assert quantize.called
+    assert (
+        resolve_adain_fused_model_path(
+            tmp_path / "model.onnx",
+            _settings(
+                onnx_adain_fusion=True,
+                onnx_adain_custom_op_library=custom_op_library,
+                onnx_adain_model_path=adain_model,
+            ),
+        )
+        == adain_model
+    )
