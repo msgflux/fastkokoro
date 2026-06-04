@@ -6,6 +6,8 @@ import platform
 import shlex
 import subprocess
 import sys
+from contextlib import ExitStack
+from importlib import resources
 from pathlib import Path
 
 
@@ -51,7 +53,23 @@ def main() -> None:
 def build_command(*, output: Path, cc: str, openmp: bool) -> list[str]:
     native_dir = Path(__file__).parent / "native"
     source = native_dir / "adain_custom_op.c"
-    include_dir = native_dir
+    return _build_command(
+        output=output,
+        cc=cc,
+        openmp=openmp,
+        source=source,
+        include_dir=native_dir,
+    )
+
+
+def _build_command(
+    *,
+    output: Path,
+    cc: str,
+    openmp: bool,
+    source: Path,
+    include_dir: Path,
+) -> list[str]:
     command = [
         cc,
         "-O3",
@@ -75,19 +93,50 @@ def build_adain_custom_op(
     output = output or default_output_path(default_cache_dir())
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    command = build_command(output=output, cc=cc, openmp=openmp)
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError:
-        if not openmp:
-            raise
-        fallback = build_command(output=output, cc=cc, openmp=False)
-        print(
-            "OpenMP build failed; retrying without -fopenmp.",
-            file=sys.stderr,
+    with native_paths() as (source, include_dir):
+        command = _build_command(
+            output=output,
+            cc=cc,
+            openmp=openmp,
+            source=source,
+            include_dir=include_dir,
         )
-        subprocess.run(fallback, check=True)
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError:
+            if not openmp:
+                raise
+            fallback = _build_command(
+                output=output,
+                cc=cc,
+                openmp=False,
+                source=source,
+                include_dir=include_dir,
+            )
+            print(
+                "OpenMP build failed; retrying without -fopenmp.",
+                file=sys.stderr,
+            )
+            subprocess.run(fallback, check=True)
     return output
+
+
+class native_paths:
+    def __enter__(self) -> tuple[Path, Path]:
+        self._stack = ExitStack()
+        native = resources.files("fastkokoro.native")
+        source = self._stack.enter_context(
+            resources.as_file(native / "adain_custom_op.c")
+        )
+        include_header = self._stack.enter_context(
+            resources.as_file(native / "onnxruntime_c_api.h")
+        )
+        self._stack.enter_context(resources.as_file(native / "onnxruntime_ep_c_api.h"))
+        return source, include_header.parent
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        self._stack.close()
+        return False
 
 
 def default_output_path(cache_dir: Path) -> Path:
