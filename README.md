@@ -190,14 +190,18 @@ rewrites generator AdaIN subgraphs into a native custom op. It requires
 `fastkokoro` generates and caches an AdaIN-fused ONNX model under
 `FASTKOKORO_CACHE_DIR/onnx`.
 
-For local experiments, build the custom op with:
+Build and enable the custom op on the target machine with the server flag:
 
 ```bash
-gcc -O3 -march=native -fopenmp -fPIC -shared \
-  -I/path/to/onnxruntime/include \
-  experiments/adain_custom_op.c \
-  -o /tmp/libfastkokoro_adain.so -lm
+FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-custom-op
 ```
+
+The flag writes the native library under `FASTKOKORO_CACHE_DIR/native` by
+default, enables AdaIN fusion for the process, and points
+`FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` at the compiled library. Use
+`--custom-op-output /path/libfastkokoro_adain.so` to choose a specific path.
+For manual builds without starting the server, run
+`uv run fastkokoro-build-adain-op --print-env`.
 
 ## ONNX Runtime Providers
 
