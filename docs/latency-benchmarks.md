@@ -54,7 +54,7 @@ Medium text, 149 characters:
 | `intra=4`, `inter=1` | `stream_sentence` | 1.19s | 16.74s |
 | `intra=4`, `inter=1` | `stream_kokoro` | 9.46s | 9.46s |
 
-The default `fastkokoro` ONNX Runtime CPU settings now use `intra_op=min(4, CPU
+The default `fastkokoro` ONNX Runtime CPU settings now use `intra_op=min(6, CPU
 count)` and `inter_op=1`. These settings favor low single-request latency. Set
 `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` and
 `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` explicitly for hardware-specific tuning,
