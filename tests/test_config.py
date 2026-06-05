@@ -1,4 +1,5 @@
 from fastkokoro.config import (
+    DEFAULT_JIT,
     DEFAULT_ONNX_ADAIN_FUSION,
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
@@ -43,6 +44,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS", "4")
     monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE", "true")
     monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,6,8,16")
+    monkeypatch.setenv("FASTKOKORO_JIT", "false")
 
     settings = Settings.from_env()
 
@@ -74,6 +76,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.stream_cpu_schedule_max_segment_words == 4
     assert settings.warmup_multi_shape is True
     assert settings.onnx_ttfc_shape_buckets == (6, 8, 16)
+    assert settings.jit is False
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -106,6 +109,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_custom_op_library is None
     assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
     assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
+    assert settings.jit == DEFAULT_JIT
     assert settings.stream_strategy == "chunk"
     assert settings.stream_max_segment_chars == 32
     assert settings.stream_max_segment_words == 2

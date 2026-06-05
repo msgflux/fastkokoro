@@ -38,6 +38,12 @@ For GPU builds on platforms supported by `onnxruntime-gpu`:
 uv add 'fastkokoro[gpu]'
 ```
 
+PCM JIT acceleration with Numba is included by default:
+
+```bash
+uv add fastkokoro
+```
+
 ## Run
 
 ```bash
@@ -166,6 +172,7 @@ Environment variables:
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
 | `FASTKOKORO_WARMUP_MULTI_SHAPE` | `false` |
 | `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` | `6,8,9,10,11,12,16,24` |
+| `FASTKOKORO_JIT` | `true` |
 | `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
@@ -178,6 +185,10 @@ Set `FASTKOKORO_WARMUP_MULTI_SHAPE=true` to enable experimental multi-shape ONNX
 warmup focused on first chunk latency. The server runs one pass per bucket from
 `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` without changing request shapes at
 runtime.
+
+`FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
+compiles the kernels, so keep startup warmup enabled to absorb this cost before
+serving requests. Set `FASTKOKORO_JIT=false` to force the NumPy path.
 
 `FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
 possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
