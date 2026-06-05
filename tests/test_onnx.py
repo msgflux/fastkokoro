@@ -32,6 +32,9 @@ def _settings(**overrides):
         onnx_weight_only_block_size=128,
         onnx_weight_only_accuracy_level=4,
         onnx_weight_only_symmetric=True,
+        onnx_adain_fusion=False,
+        onnx_adain_model_path=None,
+        onnx_adain_custom_op_library=None,
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -154,3 +157,54 @@ def test_create_session_applies_log_severity_level():
     session_options = init.call_args.kwargs["sess_options"]
     assert session_options.log_severity_level == 3
     set_severity.assert_called_once_with(3)
+
+
+def test_create_session_registers_adain_custom_op_library():
+    class FakeSessionOptions:
+        def __init__(self):
+            self._registered_custom_ops_library = []
+            self.graph_optimization_level = None
+            self.log_severity_level = None
+            self.intra_op_num_threads = 0
+            self.inter_op_num_threads = 0
+
+        def register_custom_ops_library(self, path):
+            self._registered_custom_ops_library.append(path)
+
+    custom_op_library = Path("/tmp/libfastkokoro_adain.so")
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.SessionOptions", FakeSessionOptions),
+        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(
+                onnx_adain_fusion=True,
+                onnx_adain_custom_op_library=custom_op_library,
+            ),
+        )
+
+    session_options = init.call_args.kwargs["sess_options"]
+    assert session_options._registered_custom_ops_library == [str(custom_op_library)]
+
+
+def test_create_session_rejects_adain_fusion_with_non_cpu_provider():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        ),
+        pytest.raises(ValueError, match="ADAIN_FUSION"),
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(
+                onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+                onnx_adain_fusion=True,
+                onnx_adain_custom_op_library=Path("/tmp/libfastkokoro_adain.so"),
+            ),
+        )

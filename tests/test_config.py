@@ -1,4 +1,5 @@
 from fastkokoro.config import (
+    DEFAULT_ONNX_ADAIN_FUSION,
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
     DEFAULT_ONNX_IO_BINDING,
@@ -21,6 +22,12 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE", "64")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC", "false")
+    monkeypatch.setenv("FASTKOKORO_ONNX_ADAIN_FUSION", "true")
+    monkeypatch.setenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH", "/tmp/adain.onnx")
+    monkeypatch.setenv(
+        "FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY",
+        "/tmp/libfastkokoro_adain.so",
+    )
     monkeypatch.setenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS", "40")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS", "6")
@@ -44,6 +51,9 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_weight_only_block_size == 64
     assert settings.onnx_weight_only_accuracy_level == 2
     assert settings.onnx_weight_only_symmetric is False
+    assert settings.onnx_adain_fusion is True
+    assert str(settings.onnx_adain_model_path) == "/tmp/adain.onnx"
+    assert str(settings.onnx_adain_custom_op_library) == "/tmp/libfastkokoro_adain.so"
     assert settings.onnx_log_severity_level == 2
     assert settings.stream_max_segment_chars == 40
     assert settings.stream_max_segment_words == 6
@@ -57,6 +67,9 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDERS", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_INTER_OP_NUM_THREADS", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_FUSION", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
 
     settings = Settings.from_env()
 
@@ -71,6 +84,9 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_io_binding == DEFAULT_ONNX_IO_BINDING
     assert settings.onnx_io_binding_device == DEFAULT_ONNX_IO_BINDING_DEVICE
     assert settings.onnx_weight_only_nbits is None
+    assert settings.onnx_adain_fusion == DEFAULT_ONNX_ADAIN_FUSION
+    assert settings.onnx_adain_model_path is None
+    assert settings.onnx_adain_custom_op_library is None
     assert settings.stream_strategy == "chunk"
     assert settings.stream_max_segment_chars == 32
     assert settings.stream_max_segment_words == 2

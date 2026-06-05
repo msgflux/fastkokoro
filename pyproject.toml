@@ -30,6 +30,7 @@ gpu = [
 
 [project.scripts]
 fastkokoro = "fastkokoro.cli:main"
+fastkokoro-build-adain-op = "fastkokoro.build_adain_op:main"
 
 [dependency-groups]
 dev = [

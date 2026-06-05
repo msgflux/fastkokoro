@@ -23,6 +23,7 @@ DEFAULT_ONNX_WEIGHT_ONLY_NBITS = None
 DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
 DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
 DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
+DEFAULT_ONNX_ADAIN_FUSION = False
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "chunk"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
@@ -64,6 +65,9 @@ class Settings:
     onnx_weight_only_block_size: int
     onnx_weight_only_accuracy_level: int
     onnx_weight_only_symmetric: bool
+    onnx_adain_fusion: bool
+    onnx_adain_model_path: Path | None
+    onnx_adain_custom_op_library: Path | None
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -81,6 +85,8 @@ class Settings:
         voices_path = os.getenv("FASTKOKORO_VOICES_PATH")
         cache_dir = os.getenv("FASTKOKORO_CACHE_DIR")
         providers = os.getenv("FASTKOKORO_ONNX_PROVIDERS")
+        adain_model_path = os.getenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH")
+        adain_custom_op_library = os.getenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY")
 
         return cls(
             model_repo=os.getenv("FASTKOKORO_MODEL_REPO", DEFAULT_MODEL_REPO),
@@ -152,6 +158,18 @@ class Settings:
             onnx_weight_only_symmetric=parse_bool(
                 os.getenv("FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC"),
                 default=DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC,
+            ),
+            onnx_adain_fusion=parse_bool(
+                os.getenv("FASTKOKORO_ONNX_ADAIN_FUSION"),
+                default=DEFAULT_ONNX_ADAIN_FUSION,
+            ),
+            onnx_adain_model_path=(
+                Path(adain_model_path).expanduser() if adain_model_path else None
+            ),
+            onnx_adain_custom_op_library=(
+                Path(adain_custom_op_library).expanduser()
+                if adain_custom_op_library
+                else None
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),

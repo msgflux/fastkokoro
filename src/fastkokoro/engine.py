@@ -13,6 +13,7 @@ from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro, trim_audio
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio
 from fastkokoro.config import Settings
+from fastkokoro.graph_fusion import resolve_adain_fused_model_path
 from fastkokoro.onnx import create_session
 from fastkokoro.quantization import resolve_quantized_model_path
 from fastkokoro.streaming import (
@@ -40,6 +41,7 @@ class FastKokoro:
             resolve_model_path(self.settings),
             self.settings,
         )
+        self.model_path = resolve_adain_fused_model_path(self.model_path, self.settings)
         self.voices_path = resolve_voices_path(self.settings)
         self.session = create_session(self.model_path, self.settings)
         self.kokoro = Kokoro.from_session(self.session, str(self.voices_path))

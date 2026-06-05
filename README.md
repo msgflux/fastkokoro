@@ -151,6 +151,9 @@ Environment variables:
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE` | `128` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL` | `4` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
+| `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
+| `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
+| `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
 
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
@@ -177,6 +180,28 @@ Set `FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS=4` or
 quantized ONNX model on startup. The generated model is cached under
 `FASTKOKORO_CACHE_DIR/quantized` and reused on later starts with the same
 settings.
+
+Set `FASTKOKORO_ONNX_ADAIN_FUSION=true` to use the experimental CPU-only AdaIN
+custom op optimization. This preserves ONNX Runtime's normal `Conv` kernels and
+rewrites generator AdaIN subgraphs into a native custom op. It requires
+`FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider` and
+`FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` pointing to a compiled
+`libfastkokoro_adain.so`. If `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` is unset,
+`fastkokoro` generates and caches an AdaIN-fused ONNX model under
+`FASTKOKORO_CACHE_DIR/onnx`.
+
+Build and enable the custom op on the target machine with the server flag:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-custom-op
+```
+
+The flag writes the native library under `FASTKOKORO_CACHE_DIR/native` by
+default, enables AdaIN fusion for the process, and points
+`FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` at the compiled library. Use
+`--custom-op-output /path/libfastkokoro_adain.so` to choose a specific path.
+For manual builds without starting the server, run
+`uv run fastkokoro-build-adain-op --print-env`.
 
 ## ONNX Runtime Providers
 
