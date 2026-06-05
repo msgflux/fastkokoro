@@ -58,6 +58,7 @@ class FastKokoro:
             "input_ids" if "input_ids" in self._onnx_input_names else "tokens"
         )
         self._onnx_input_buffers = threading.local()
+        self._warm_ttfc_shape_buckets()
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
             "model_path=%s voices_path=%s active_providers=%s "
@@ -203,6 +204,26 @@ class FastKokoro:
             }
 
         return inputs
+
+    def _warm_ttfc_shape_buckets(self) -> None:
+        if not self.settings.warmup_multi_shape:
+            return
+        if not self.settings.onnx_ttfc_shape_buckets:
+            return
+
+        voice = self._voice_styles[self.settings.default_voice]
+        warmed: list[int] = []
+        for bucket in self.settings.onnx_ttfc_shape_buckets:
+            token_count = bucket - 2
+            if token_count <= 0 or token_count > MAX_PHONEME_LENGTH:
+                continue
+            if token_count >= len(voice):
+                continue
+            inputs = self._build_onnx_inputs([0] * token_count, voice, 1.0)
+            self.session.run(None, inputs)
+            warmed.append(bucket)
+        if warmed:
+            logger.info("Warmed ONNX TTFC shape buckets: buckets=%s", warmed)
 
     def _run_onnx_audio_iobinding(self, inputs: dict[str, np.ndarray]) -> np.ndarray:
         device = self._resolve_iobinding_device()

@@ -62,6 +62,18 @@ Run the server from source:
 uv run fastkokoro
 ```
 
+Enable experimental TTFC multi-shape warmup from CLI:
+
+```bash
+uv run fastkokoro --warmup-multi-shape
+```
+
+Or provide custom buckets:
+
+```bash
+uv run fastkokoro --warmup-multi-shape-buckets 6,8,9,10,11,12,16,24
+```
+
 For GPU development environments:
 
 ```bash
@@ -140,6 +152,7 @@ Environment variables:
 | `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `32` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | `2` |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
+| `FASTKOKORO_ONNX_PROVIDER_OPTIONS` | unset |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
 | `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` | `min(6, CPU count)` |
 | `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` | `1` |
@@ -151,6 +164,8 @@ Environment variables:
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE` | `128` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL` | `4` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
+| `FASTKOKORO_WARMUP_MULTI_SHAPE` | `false` |
+| `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` | `6,8,9,10,11,12,16,24` |
 | `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
@@ -158,6 +173,11 @@ Environment variables:
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
+
+Set `FASTKOKORO_WARMUP_MULTI_SHAPE=true` to enable experimental multi-shape ONNX
+warmup focused on first chunk latency. The server runs one pass per bucket from
+`FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` without changing request shapes at
+runtime.
 
 `FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
 possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
@@ -224,6 +244,15 @@ TensorRT with CUDA and CPU fallback:
 
 ```bash
 FASTKOKORO_ONNX_PROVIDERS=TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
+```
+
+Provider options can be passed as JSON keyed by provider name. For example,
+CUDA GPU device selection:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider \
+FASTKOKORO_ONNX_PROVIDER_OPTIONS='{"CUDAExecutionProvider":{"device_id":"0"}}' \
+uv run fastkokoro
 ```
 
 Set `FASTKOKORO_ONNX_AUTO_PROVIDERS=true` to pass every provider available in the

@@ -23,6 +23,7 @@ def _settings(**overrides):
         host="0.0.0.0",
         port=8880,
         onnx_providers=("CPUExecutionProvider",),
+        onnx_provider_options={},
         onnx_auto_providers=False,
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
@@ -37,6 +38,8 @@ def _settings(**overrides):
         onnx_adain_fusion=False,
         onnx_adain_model_path=None,
         onnx_adain_custom_op_library=None,
+        warmup_multi_shape=False,
+        onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -309,6 +312,29 @@ def test_create_reuses_preallocated_token_inputs():
     assert first_tokens.base is second_tokens.base
     assert first_tokens.shape == (1, 5)
     assert second_tokens.shape == (1, 8)
+
+
+def test_warm_ttfc_shape_buckets_runs_selected_shapes():
+    runs = []
+    engine = _engine(
+        _settings(
+            warmup_multi_shape=True,
+            onnx_ttfc_shape_buckets=(6, 8),
+        )
+    )
+
+    def run(output_names, inputs):
+        runs.append(inputs["tokens"].shape[1])
+        return [np.ones(48, dtype=np.float32)]
+
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        run=run,
+    )
+
+    engine._warm_ttfc_shape_buckets()
+
+    assert runs == [6, 8]
 
 
 def test_create_can_run_with_iobinding():
