@@ -30,6 +30,9 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
             "Requested ONNX Runtime provider(s) are not available: "
             f"{', '.join(missing)}. Available providers: {', '.join(available)}"
         )
+    provider_options = [
+        settings.onnx_provider_options.get(provider, {}) for provider in providers
+    ]
 
     ort.set_default_logger_severity(settings.onnx_log_severity_level)
     session_options = ort.SessionOptions()
@@ -50,13 +53,16 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
     session = ort.InferenceSession(
         str(model_path),
         providers=providers,
+        provider_options=provider_options,
         sess_options=session_options,
     )
     logger.info(
         "ONNX Runtime session initialized: model=%s requested_providers=%s "
-        "active_providers=%s available_providers=%s graph_optimization_level=%s",
+        "provider_options=%s active_providers=%s available_providers=%s "
+        "graph_optimization_level=%s",
         model_path,
         providers,
+        provider_options,
         session.get_providers(),
         available,
         settings.onnx_graph_optimization_level,

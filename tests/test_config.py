@@ -4,6 +4,8 @@ from fastkokoro.config import (
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
     DEFAULT_ONNX_IO_BINDING,
     DEFAULT_ONNX_IO_BINDING_DEVICE,
+    DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
+    DEFAULT_WARMUP_MULTI_SHAPE,
     Settings,
 )
 
@@ -12,6 +14,10 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv(
         "FASTKOKORO_ONNX_PROVIDERS",
         "CUDAExecutionProvider, CPUExecutionProvider",
+    )
+    monkeypatch.setenv(
+        "FASTKOKORO_ONNX_PROVIDER_OPTIONS",
+        '{"CUDAExecutionProvider":{"device_id":"0"}}',
     )
     monkeypatch.setenv("FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS", "4")
     monkeypatch.setenv("FASTKOKORO_ONNX_INTER_OP_NUM_THREADS", "2")
@@ -35,6 +41,8 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS", "10")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS", "56")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS", "4")
+    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE", "true")
+    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,6,8,16")
 
     settings = Settings.from_env()
 
@@ -42,6 +50,9 @@ def test_settings_parses_onnx_providers(monkeypatch):
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
     )
+    assert settings.onnx_provider_options == {
+        "CUDAExecutionProvider": {"device_id": "0"}
+    }
     assert settings.onnx_intra_op_num_threads == 4
     assert settings.onnx_inter_op_num_threads == 2
     assert settings.onnx_graph_optimization_level == "extended"
@@ -61,6 +72,8 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.stream_schedule_max_segment_words == 10
     assert settings.stream_cpu_schedule_max_segment_chars == 56
     assert settings.stream_cpu_schedule_max_segment_words == 4
+    assert settings.warmup_multi_shape is True
+    assert settings.onnx_ttfc_shape_buckets == (6, 8, 16)
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -70,10 +83,14 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_FUSION", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
+    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
+    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
 
     settings = Settings.from_env()
 
     assert settings.onnx_providers == ("CPUExecutionProvider",)
+    assert settings.onnx_provider_options == {}
     assert settings.onnx_auto_providers is False
     assert settings.onnx_intra_op_num_threads == DEFAULT_ONNX_INTRA_OP_NUM_THREADS
     assert settings.onnx_inter_op_num_threads == 1
@@ -87,6 +104,8 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_fusion == DEFAULT_ONNX_ADAIN_FUSION
     assert settings.onnx_adain_model_path is None
     assert settings.onnx_adain_custom_op_library is None
+    assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
+    assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
     assert settings.stream_strategy == "chunk"
     assert settings.stream_max_segment_chars == 32
     assert settings.stream_max_segment_words == 2
@@ -112,6 +131,17 @@ def test_settings_parses_auto_providers(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.onnx_auto_providers is True
+
+
+def test_settings_rejects_invalid_provider_options(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", "[]")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "FASTKOKORO_ONNX_PROVIDER_OPTIONS" in str(exc)
+    else:
+        raise AssertionError("expected invalid provider options to fail")
 
 
 def test_settings_parses_stream_options(monkeypatch):
@@ -166,3 +196,14 @@ def test_settings_rejects_invalid_weight_only_nbits(monkeypatch):
         assert "FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS" in str(exc)
     else:
         raise AssertionError("expected invalid weight-only nbits to fail")
+
+
+def test_settings_rejects_invalid_ttfc_shape_buckets(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,0,16")
+
+    try:
+        Settings.from_env()
+    except ValueError as exc:
+        assert "FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS" in str(exc)
+    else:
+        raise AssertionError("expected invalid ttfc shape buckets to fail")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,8 @@ DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
 DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
 DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_ONNX_ADAIN_FUSION = False
+DEFAULT_WARMUP_MULTI_SHAPE = False
+DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 8, 9, 10, 11, 12, 16, 24)
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "chunk"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
@@ -54,6 +57,7 @@ class Settings:
     host: str
     port: int
     onnx_providers: tuple[str, ...]
+    onnx_provider_options: dict[str, dict[str, str]]
     onnx_auto_providers: bool
     onnx_intra_op_num_threads: int | None
     onnx_inter_op_num_threads: int | None
@@ -68,6 +72,8 @@ class Settings:
     onnx_adain_fusion: bool
     onnx_adain_model_path: Path | None
     onnx_adain_custom_op_library: Path | None
+    warmup_multi_shape: bool
+    onnx_ttfc_shape_buckets: tuple[int, ...]
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -85,6 +91,7 @@ class Settings:
         voices_path = os.getenv("FASTKOKORO_VOICES_PATH")
         cache_dir = os.getenv("FASTKOKORO_CACHE_DIR")
         providers = os.getenv("FASTKOKORO_ONNX_PROVIDERS")
+        provider_options = os.getenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS")
         adain_model_path = os.getenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH")
         adain_custom_op_library = os.getenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY")
 
@@ -103,6 +110,7 @@ class Settings:
             host=os.getenv("FASTKOKORO_HOST", DEFAULT_HOST),
             port=int(os.getenv("FASTKOKORO_PORT", str(DEFAULT_PORT))),
             onnx_providers=parse_csv(providers) or DEFAULT_ONNX_PROVIDERS,
+            onnx_provider_options=parse_provider_options(provider_options),
             onnx_auto_providers=parse_bool(os.getenv("FASTKOKORO_ONNX_AUTO_PROVIDERS")),
             onnx_intra_op_num_threads=parse_optional_int(
                 os.getenv(
@@ -171,6 +179,14 @@ class Settings:
                 if adain_custom_op_library
                 else None
             ),
+            warmup_multi_shape=parse_bool(
+                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE"),
+                default=DEFAULT_WARMUP_MULTI_SHAPE,
+            ),
+            onnx_ttfc_shape_buckets=parse_int_csv(
+                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS")
+            )
+            or DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
             stream_strategy=parse_stream_strategy(
@@ -232,6 +248,41 @@ def parse_csv(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def parse_provider_options(value: str | None) -> dict[str, dict[str, str]]:
+    if value is None or value.strip() == "":
+        return {}
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError("FASTKOKORO_ONNX_PROVIDER_OPTIONS must be a JSON object")
+
+    options: dict[str, dict[str, str]] = {}
+    for provider, provider_options in parsed.items():
+        if not isinstance(provider, str) or not isinstance(provider_options, dict):
+            raise ValueError(
+                "FASTKOKORO_ONNX_PROVIDER_OPTIONS must map provider names to objects"
+            )
+        options[provider] = {
+            str(key): str(option_value)
+            for key, option_value in provider_options.items()
+        }
+    return options
+
+
+def parse_int_csv(value: str | None) -> tuple[int, ...]:
+    if not value:
+        return ()
+    parsed = []
+    for item in value.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        integer = int(candidate)
+        if integer <= 0:
+            raise ValueError("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS must be positive")
+        parsed.append(integer)
+    return tuple(sorted(set(parsed)))
 
 
 def parse_bool(value: str | None, *, default: bool = False) -> bool:

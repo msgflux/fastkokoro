@@ -21,6 +21,7 @@ def _settings(**overrides):
         host="0.0.0.0",
         port=8880,
         onnx_providers=("CPUExecutionProvider",),
+        onnx_provider_options={},
         onnx_auto_providers=False,
         onnx_intra_op_num_threads=None,
         onnx_inter_op_num_threads=None,
@@ -35,6 +36,8 @@ def _settings(**overrides):
         onnx_adain_fusion=False,
         onnx_adain_model_path=None,
         onnx_adain_custom_op_library=None,
+        warmup_multi_shape=False,
+        onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -64,6 +67,7 @@ def test_create_session_uses_configured_providers():
 
     assert result is session
     assert init.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
+    assert init.call_args.kwargs["provider_options"] == [{}]
     assert session.get_providers.called
 
 
@@ -85,6 +89,36 @@ def test_create_session_auto_uses_all_available_providers():
     assert init.call_args.kwargs["providers"] == [
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
+    ]
+    assert init.call_args.kwargs["provider_options"] == [{}, {}]
+
+
+def test_create_session_applies_provider_options():
+    session = Mock()
+    session.get_providers.return_value = [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ]
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.InferenceSession", return_value=session) as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(
+                onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+                onnx_provider_options={
+                    "CUDAExecutionProvider": {"device_id": "0"},
+                },
+            ),
+        )
+
+    assert init.call_args.kwargs["provider_options"] == [
+        {"device_id": "0"},
+        {},
     ]
 
 

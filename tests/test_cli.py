@@ -43,3 +43,36 @@ def test_cli_custom_op_preserves_existing_provider_env(monkeypatch, tmp_path):
     ):
         cli.main()
         assert cli.os.environ["FASTKOKORO_ONNX_PROVIDERS"] == "CUDAExecutionProvider"
+
+
+def test_cli_warmup_multi_shape_sets_environment(monkeypatch):
+    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
+
+    with (
+        patch.dict(cli.os.environ, {}, clear=False),
+        patch("sys.argv", ["fastkokoro", "--warmup-multi-shape"]),
+        patch("fastkokoro.cli.uvicorn.run") as run,
+    ):
+        cli.main()
+        assert cli.os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE"] == "true"
+
+    run.assert_called_once()
+
+
+def test_cli_warmup_multi_shape_buckets_sets_environment(monkeypatch):
+    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
+    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
+
+    with (
+        patch.dict(cli.os.environ, {}, clear=False),
+        patch(
+            "sys.argv",
+            ["fastkokoro", "--warmup-multi-shape-buckets", "6,8,16"],
+        ),
+        patch("fastkokoro.cli.uvicorn.run") as run,
+    ):
+        cli.main()
+        assert cli.os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE"] == "true"
+        assert cli.os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS"] == "6,8,16"
+
+    run.assert_called_once()
