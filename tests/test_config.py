@@ -105,6 +105,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
     monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
     monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
+    monkeypatch.delenv("FASTKOKORO_CORS_ALLOW_ORIGINS", raising=False)
 
     settings = Settings.from_env()
 
@@ -136,6 +137,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.stream_schedule_max_segment_words == 12
     assert settings.stream_cpu_schedule_max_segment_chars == 48
     assert settings.stream_cpu_schedule_max_segment_words == 4
+    assert settings.cors_allow_origins == ("*",)
 
 
 def test_settings_allows_ort_default_thread_options(monkeypatch):
@@ -230,3 +232,23 @@ def test_settings_rejects_invalid_ttfc_shape_buckets(monkeypatch):
         assert "FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS" in str(exc)
     else:
         raise AssertionError("expected invalid ttfc shape buckets to fail")
+
+
+def test_settings_parses_cors(monkeypatch):
+    monkeypatch.setenv(
+        "FASTKOKORO_CORS_ALLOW_ORIGINS",
+        "http://localhost:3000, https://example.com",
+    )
+    monkeypatch.setenv("FASTKOKORO_CORS_ALLOW_METHODS", "GET, POST")
+    monkeypatch.setenv("FASTKOKORO_CORS_ALLOW_HEADERS", "Authorization, Content-Type")
+    monkeypatch.setenv("FASTKOKORO_CORS_ALLOW_CREDENTIALS", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.cors_allow_origins == (
+        "http://localhost:3000",
+        "https://example.com",
+    )
+    assert settings.cors_allow_methods == ("GET", "POST")
+    assert settings.cors_allow_headers == ("Authorization", "Content-Type")
+    assert settings.cors_allow_credentials is True

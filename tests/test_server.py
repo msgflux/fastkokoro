@@ -1,11 +1,19 @@
 from collections.abc import AsyncGenerator
+from pathlib import Path
+from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 
+from fastkokoro.config import Settings
 from fastkokoro.server import create_app
 
 
 class FakeEngine:
+    def __init__(self):
+        self.settings = settings()
+        self.session = Mock()
+        self.session.get_providers.return_value = ["CPUExecutionProvider"]
+
     def voices(self) -> list[str]:
         return ["af_heart", "pf_dora"]
 
@@ -24,6 +32,60 @@ class FakeEngine:
         yield b"chunk-2"
 
 
+def settings(**overrides):
+    values = dict(
+        model_repo="repo",
+        model_file="model.onnx",
+        voices_file="voices.bin",
+        voices_index_file="voices.txt",
+        model_path=None,
+        voices_path=None,
+        cache_dir=Path("/tmp/cache"),
+        default_voice="af_heart",
+        default_lang="en-us",
+        host="0.0.0.0",
+        port=8880,
+        onnx_providers=("CPUExecutionProvider",),
+        onnx_provider_options={},
+        onnx_auto_providers=False,
+        onnx_intra_op_num_threads=None,
+        onnx_inter_op_num_threads=None,
+        onnx_graph_optimization_level="all",
+        onnx_log_severity_level=3,
+        onnx_io_binding=False,
+        onnx_io_binding_device="auto",
+        onnx_weight_only_nbits=None,
+        onnx_weight_only_block_size=128,
+        onnx_weight_only_accuracy_level=4,
+        onnx_weight_only_symmetric=True,
+        onnx_adain_fusion=False,
+        onnx_adain_model_path=None,
+        onnx_adain_custom_op_library=None,
+        onnx_conv_adain_fusion=False,
+        onnx_conv_adain_model_path=None,
+        onnx_conv_adain_custom_op_library=None,
+        warmup_multi_shape=False,
+        onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        jit=False,
+        warmup=False,
+        warmup_text="hello",
+        stream_strategy="sentence",
+        stream_audio_frame_ms=200,
+        stream_max_segment_chars=80,
+        stream_max_segment_words=12,
+        stream_schedule_max_segment_chars=96,
+        stream_schedule_max_segment_words=12,
+        stream_cpu_schedule_max_segment_chars=48,
+        stream_cpu_schedule_max_segment_words=4,
+        cors_allow_origins=("*",),
+        cors_allow_methods=("GET", "POST", "OPTIONS"),
+        cors_allow_headers=("*",),
+        cors_allow_credentials=False,
+    )
+    values.update(overrides)
+    return Settings(**values)
+
+
 def test_health():
     client = TestClient(create_app(FakeEngine()))
 
@@ -31,6 +93,59 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
+
+
+def test_metrics_endpoint_reports_http_requests():
+    client = TestClient(create_app(FakeEngine()))
+
+    client.get("/health")
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["http"]["requests"] >= 1
+    assert data["http"]["by_path"]["/health"] == 1
+    assert data["speech"]["requests"] == 0
+    assert data["runtime"]["active_providers"] == ["CPUExecutionProvider"]
+
+
+def test_cors_preflight():
+    app = create_app(
+        FakeEngine(),
+        settings(
+            cors_allow_origins=("http://localhost:3000",),
+            cors_allow_methods=("GET", "POST", "OPTIONS"),
+            cors_allow_headers=("Authorization", "Content-Type"),
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.options(
+        "/v1/audio/speech",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization, Content-Type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_cors_default_allows_any_origin():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.options(
+        "/v1/audio/speech",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
 
 
 def test_models():
@@ -83,6 +198,11 @@ def test_speech_defaults_to_pcm_response_format():
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("audio/pcm")
+
+    metrics = client.get("/metrics").json()
+    assert metrics["speech"]["requests"] == 1
+    assert metrics["speech"]["bytes"] == len(b"audio")
+    assert metrics["speech"]["latency_seconds_last"] >= 0
 
 
 def test_speech_accepts_portuguese_alias():
@@ -155,3 +275,11 @@ def test_speech_streaming():
     assert response.status_code == 200
     assert content == b"chunk-1chunk-2"
     assert response.headers["content-type"].startswith("audio/pcm")
+
+    metrics = client.get("/metrics").json()
+    assert metrics["speech"]["requests"] == 1
+    assert metrics["speech"]["streaming_requests"] == 1
+    assert metrics["speech"]["chunks"] == 2
+    assert metrics["speech"]["bytes"] == len(content)
+    assert metrics["speech"]["first_chunk_observations"] == 1
+    assert metrics["speech"]["first_chunk_latency_seconds_last"] >= 0

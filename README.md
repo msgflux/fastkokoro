@@ -179,6 +179,10 @@ Environment variables:
 | `FASTKOKORO_ONNX_CONV_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` | unset |
+| `FASTKOKORO_CORS_ALLOW_ORIGINS` | `*` |
+| `FASTKOKORO_CORS_ALLOW_METHODS` | `GET,POST,OPTIONS` |
+| `FASTKOKORO_CORS_ALLOW_HEADERS` | `*` |
+| `FASTKOKORO_CORS_ALLOW_CREDENTIALS` | `false` |
 
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
@@ -261,6 +265,12 @@ uv run fastkokoro-build-conv-adain-op --print-env
 This path is highly hardware-dependent and may regress latency on some CPUs.
 Always benchmark against the baseline before enabling it in production.
 
+Restrict CORS by setting one or more allowed origins:
+
+```bash
+FASTKOKORO_CORS_ALLOW_ORIGINS=http://localhost:3000 fastkokoro
+```
+
 ## ONNX Runtime Providers
 
 `fastkokoro` creates the ONNX Runtime session directly, so provider selection is
@@ -316,6 +326,22 @@ Models:
 ```bash
 curl http://localhost:8880/v1/models
 ```
+
+Metrics:
+
+```bash
+curl http://localhost:8880/metrics
+```
+
+The metrics endpoint returns JSON counters and latency summaries for HTTP
+requests and speech generation, including streaming chunk counts, total bytes,
+time to first speech chunk, and active ONNX Runtime providers. For streaming
+speech responses, use the `speech` latency fields; HTTP middleware latency only
+tracks response setup.
+
+Run benchmarks with `FASTKOKORO_WARMUP=true`, which is the default. Compare
+requests after startup so model/session initialization does not pollute latency
+measurements.
 
 The server exposes the local Kokoro model as `kokoro`. For client compatibility,
 `/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases, but
