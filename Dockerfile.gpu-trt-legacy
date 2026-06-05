@@ -1,0 +1,58 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04 AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+ENV UV_MANAGED_PYTHON=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+
+RUN uv venv --python 3.12 .venv \
+    && uv pip install --python .venv/bin/python \
+        --extra-index-url https://pypi.nvidia.com \
+        "colorlog>=6.9.0" \
+        "espeakng-loader>=0.2.4" \
+        "fastapi>=0.115.0" \
+        "huggingface-hub>=0.36.0" \
+        "numba>=0.65.0" \
+        "numpy==1.26.4" \
+        "onnx>=1.16.0" \
+        "onnx-ir>=0.1.0" \
+        "onnxruntime-gpu==1.18.0" \
+        "orjson>=3.10.0" \
+        "phonemizer-fork>=3.3.2" \
+        "pydantic>=2.0.0" \
+        "soundfile>=0.13.0" \
+        "sympy>=1.13.0" \
+        "tensorrt-cu11==10.9.0.34" \
+        "uvicorn>=0.32.0" \
+        "uvloop>=0.21.0" \
+    && uv pip install --python .venv/bin/python --no-deps "kokoro-onnx==0.4.9" \
+    && uv pip install --python .venv/bin/python --no-deps .
+
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS runtime
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV LD_LIBRARY_PATH="/app/.venv/lib/python3.12/site-packages/tensorrt_libs:${LD_LIBRARY_PATH}"
+ENV FASTKOKORO_HOST=0.0.0.0
+ENV FASTKOKORO_PORT=8880
+ENV FASTKOKORO_CACHE_DIR=/models
+ENV FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider
+ENV FASTKOKORO_ONNX_PROVIDER_OPTIONS="{\"TensorrtExecutionProvider\":{\"trt_fp16_enable\":\"True\",\"trt_engine_cache_enable\":\"True\",\"trt_engine_cache_path\":\"/models/trt-cache\"}}"
+
+WORKDIR /app
+
+COPY --from=builder /root/.local/share/uv/python /root/.local/share/uv/python
+COPY --from=builder /app /app
+
+EXPOSE 8880
+VOLUME ["/models"]
+
+CMD ["fastkokoro"]
