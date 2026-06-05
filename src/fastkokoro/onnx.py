@@ -24,6 +24,13 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
     )
     if settings.onnx_adain_fusion:
         _validate_adain_fusion_providers(providers)
+    if settings.onnx_conv_adain_fusion:
+        _validate_conv_adain_fusion_providers(providers)
+    if settings.onnx_adain_fusion and settings.onnx_conv_adain_fusion:
+        raise ValueError(
+            "FASTKOKORO_ONNX_ADAIN_FUSION and FASTKOKORO_ONNX_CONV_ADAIN_FUSION "
+            "cannot be enabled at the same time"
+        )
     missing = [provider for provider in providers if provider not in available]
     if missing:
         raise ValueError(
@@ -48,6 +55,11 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
         assert settings.onnx_adain_custom_op_library is not None
         session_options.register_custom_ops_library(
             str(settings.onnx_adain_custom_op_library)
+        )
+    if settings.onnx_conv_adain_fusion:
+        assert settings.onnx_conv_adain_custom_op_library is not None
+        session_options.register_custom_ops_library(
+            str(settings.onnx_conv_adain_custom_op_library)
         )
 
     session = ort.InferenceSession(
@@ -76,4 +88,13 @@ def _validate_adain_fusion_providers(providers: list[str]) -> None:
             "FASTKOKORO_ONNX_ADAIN_FUSION is currently supported only with "
             "CPUExecutionProvider. Custom AdaIN runs as a CPU custom op and can "
             "cause provider copies or regressions with GPU/OpenVINO providers."
+        )
+
+
+def _validate_conv_adain_fusion_providers(providers: list[str]) -> None:
+    if providers != ["CPUExecutionProvider"]:
+        raise ValueError(
+            "FASTKOKORO_ONNX_CONV_ADAIN_FUSION is currently supported only with "
+            "CPUExecutionProvider. Custom ConvAdaIN runs as a CPU custom op and "
+            "can cause provider copies or regressions with GPU/OpenVINO providers."
         )
