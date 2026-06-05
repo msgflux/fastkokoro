@@ -36,6 +36,9 @@ def _settings(**overrides):
         onnx_adain_fusion=False,
         onnx_adain_model_path=None,
         onnx_adain_custom_op_library=None,
+        onnx_conv_adain_fusion=False,
+        onnx_conv_adain_model_path=None,
+        onnx_conv_adain_custom_op_library=None,
         warmup_multi_shape=False,
         onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
         jit=False,
@@ -241,5 +244,79 @@ def test_create_session_rejects_adain_fusion_with_non_cpu_provider():
                 onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
                 onnx_adain_fusion=True,
                 onnx_adain_custom_op_library=Path("/tmp/libfastkokoro_adain.so"),
+            ),
+        )
+
+
+def test_create_session_registers_conv_adain_custom_op_library():
+    class FakeSessionOptions:
+        def __init__(self):
+            self._registered_custom_ops_library = []
+            self.graph_optimization_level = None
+            self.log_severity_level = None
+            self.intra_op_num_threads = 0
+            self.inter_op_num_threads = 0
+
+        def register_custom_ops_library(self, path):
+            self._registered_custom_ops_library.append(path)
+
+    custom_op_library = Path("/tmp/libfastkokoro_conv_adain.so")
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        patch("fastkokoro.onnx.ort.SessionOptions", FakeSessionOptions),
+        patch("fastkokoro.onnx.ort.InferenceSession") as init,
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(
+                onnx_conv_adain_fusion=True,
+                onnx_conv_adain_custom_op_library=custom_op_library,
+            ),
+        )
+
+    session_options = init.call_args.kwargs["sess_options"]
+    assert session_options._registered_custom_ops_library == [str(custom_op_library)]
+
+
+def test_create_session_rejects_conv_adain_fusion_with_non_cpu_provider():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        ),
+        pytest.raises(ValueError, match="CONV_ADAIN_FUSION"),
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(
+                onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+                onnx_conv_adain_fusion=True,
+                onnx_conv_adain_custom_op_library=Path(
+                    "/tmp/libfastkokoro_conv_adain.so"
+                ),
+            ),
+        )
+
+
+def test_create_session_rejects_adain_and_conv_adain_together():
+    with (
+        patch(
+            "fastkokoro.onnx.ort.get_available_providers",
+            return_value=["CPUExecutionProvider"],
+        ),
+        pytest.raises(ValueError, match="cannot be enabled at the same time"),
+    ):
+        create_session(
+            Path("model.onnx"),
+            _settings(
+                onnx_adain_fusion=True,
+                onnx_adain_custom_op_library=Path("/tmp/libfastkokoro_adain.so"),
+                onnx_conv_adain_fusion=True,
+                onnx_conv_adain_custom_op_library=Path(
+                    "/tmp/libfastkokoro_conv_adain.so"
+                ),
             ),
         )

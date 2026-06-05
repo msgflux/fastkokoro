@@ -1,6 +1,7 @@
 from fastkokoro.config import (
     DEFAULT_JIT,
     DEFAULT_ONNX_ADAIN_FUSION,
+    DEFAULT_ONNX_CONV_ADAIN_FUSION,
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
     DEFAULT_ONNX_IO_BINDING,
@@ -35,6 +36,12 @@ def test_settings_parses_onnx_providers(monkeypatch):
         "FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY",
         "/tmp/libfastkokoro_adain.so",
     )
+    monkeypatch.setenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION", "true")
+    monkeypatch.setenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", "/tmp/conv_adain.onnx")
+    monkeypatch.setenv(
+        "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY",
+        "/tmp/libfastkokoro_conv_adain.so",
+    )
     monkeypatch.setenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS", "40")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS", "6")
@@ -67,6 +74,12 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_adain_fusion is True
     assert str(settings.onnx_adain_model_path) == "/tmp/adain.onnx"
     assert str(settings.onnx_adain_custom_op_library) == "/tmp/libfastkokoro_adain.so"
+    assert settings.onnx_conv_adain_fusion is True
+    assert str(settings.onnx_conv_adain_model_path) == "/tmp/conv_adain.onnx"
+    assert (
+        str(settings.onnx_conv_adain_custom_op_library)
+        == "/tmp/libfastkokoro_conv_adain.so"
+    )
     assert settings.onnx_log_severity_level == 2
     assert settings.stream_max_segment_chars == 40
     assert settings.stream_max_segment_words == 6
@@ -86,6 +99,9 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_FUSION", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
     monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
     monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
@@ -107,6 +123,9 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_fusion == DEFAULT_ONNX_ADAIN_FUSION
     assert settings.onnx_adain_model_path is None
     assert settings.onnx_adain_custom_op_library is None
+    assert settings.onnx_conv_adain_fusion == DEFAULT_ONNX_CONV_ADAIN_FUSION
+    assert settings.onnx_conv_adain_model_path is None
+    assert settings.onnx_conv_adain_custom_op_library is None
     assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
     assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
     assert settings.jit == DEFAULT_JIT

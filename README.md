@@ -176,6 +176,9 @@ Environment variables:
 | `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
+| `FASTKOKORO_ONNX_CONV_ADAIN_FUSION` | `false` |
+| `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` | unset; generated under cache |
+| `FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` | unset |
 
 `FASTKOKORO_WARMUP=true` runs a short synthesis during startup. This makes the
 server take a little longer to become ready, but avoids paying most of the first
@@ -233,6 +236,30 @@ default, enables AdaIN fusion for the process, and points
 `--custom-op-output /path/libfastkokoro_adain.so` to choose a specific path.
 For manual builds without starting the server, run
 `uv run fastkokoro-build-adain-op --print-env`.
+
+Set `FASTKOKORO_ONNX_CONV_ADAIN_FUSION=true` to use the experimental CPU-only
+`Conv1dAdaIn` custom op optimization. This rewrites generator `Conv -> AdaIN`
+subgraphs into a fused native custom op and can reduce CPU latency in the
+decoder path. It requires `FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider` and
+`FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` pointing to a compiled
+`libfastkokoro_conv_adain.so`. If `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` is
+unset, `fastkokoro` generates and caches a ConvAdaIN-fused ONNX model under
+`FASTKOKORO_CACHE_DIR/onnx`.
+
+Build and enable the ConvAdaIN custom op on the target machine with:
+
+```bash
+FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-conv-custom-op
+```
+
+Or build it manually without starting the server:
+
+```bash
+uv run fastkokoro-build-conv-adain-op --print-env
+```
+
+This path is highly hardware-dependent and may regress latency on some CPUs.
+Always benchmark against the baseline before enabling it in production.
 
 ## ONNX Runtime Providers
 
