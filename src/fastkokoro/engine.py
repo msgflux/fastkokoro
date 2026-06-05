@@ -8,10 +8,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import onnxruntime as ort
-from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro, trim_audio
+from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro
 
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
-from fastkokoro.audio import AudioFormat, encode_audio
+from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part
 from fastkokoro.config import Settings
 from fastkokoro.graph_fusion import resolve_adain_fused_model_path
 from fastkokoro.onnx import create_session
@@ -25,6 +25,7 @@ from fastkokoro.streaming import (
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
+OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
 
 
 @dataclass
@@ -58,6 +59,7 @@ class FastKokoro:
             "input_ids" if "input_ids" in self._onnx_input_names else "tokens"
         )
         self._onnx_input_buffers = threading.local()
+        self._output_buffers = threading.local()
         self._warm_ttfc_shape_buckets()
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
@@ -129,7 +131,12 @@ class FastKokoro:
             speed=speed,
             lang=lang,
         )
-        return encode_audio(samples, sample_rate, response_format)
+        return encode_audio(
+            samples,
+            sample_rate,
+            response_format,
+            use_pcm_jit=self.settings.jit,
+        )
 
     def _create_samples(
         self,
@@ -144,16 +151,27 @@ class FastKokoro:
         assert 0.5 <= speed <= 2.0, "Speed should be between 0.5 and 2.0"
 
         phonemes = text if is_phonemes else self.kokoro.tokenizer.phonemize(text, lang)
-        audio_parts = []
-        for phoneme_batch in split_phonemes_for_model(phonemes):
+        phoneme_batches = split_phonemes_for_model(phonemes)
+        if not phoneme_batches:
+            return np.array([], dtype=np.float32), SAMPLE_RATE
+
+        initial_size = self._select_output_buffer_size(len(phoneme_batches) * 4096)
+        merged = self._acquire_output_buffer(initial_size)
+        merged_length = 0
+        for phoneme_batch in phoneme_batches:
             audio_part = self._run_onnx_audio(phoneme_batch, voice, speed)
             if trim:
-                audio_part, _ = trim_audio(audio_part)
-            audio_parts.append(audio_part)
+                audio_part = self._trim_audio_part(audio_part)
+            required = merged_length + len(audio_part)
+            if required > len(merged):
+                merged = self._grow_output_buffer(merged, merged_length, required)
+            merged[merged_length:required] = audio_part
+            merged_length = required
 
-        if not audio_parts:
-            return np.array([], dtype=np.float32), SAMPLE_RATE
-        return np.concatenate(audio_parts), SAMPLE_RATE
+        return merged[:merged_length], SAMPLE_RATE
+
+    def _trim_audio_part(self, audio_part: np.ndarray) -> np.ndarray:
+        return trim_audio_part(audio_part, use_jit=self.settings.jit)
 
     def _run_onnx_audio(
         self,
@@ -277,6 +295,35 @@ class FastKokoro:
             self._onnx_input_buffers.buffers = buffers
         return buffers
 
+    def _get_output_buffer_pool(self) -> dict[int, np.ndarray]:
+        pool = getattr(self._output_buffers, "buffers", None)
+        if pool is None:
+            pool = {}
+            self._output_buffers.buffers = pool
+        return pool
+
+    def _select_output_buffer_size(self, required: int) -> int:
+        for size in OUTPUT_BUFFER_POOL_SIZES:
+            if size >= required:
+                return size
+        return 1 << (required - 1).bit_length()
+
+    def _acquire_output_buffer(self, size: int) -> np.ndarray:
+        pool = self._get_output_buffer_pool()
+        buffer = pool.get(size)
+        if buffer is None or len(buffer) < size:
+            buffer = np.empty(size, dtype=np.float32)
+            pool[size] = buffer
+        return buffer
+
+    def _grow_output_buffer(
+        self, source: np.ndarray, source_length: int, required: int
+    ) -> np.ndarray:
+        target_size = self._select_output_buffer_size(required)
+        grown = self._acquire_output_buffer(target_size)
+        grown[:source_length] = source[:source_length]
+        return grown
+
     async def create_stream(
         self,
         text: str,
@@ -300,6 +347,7 @@ class FastKokoro:
                     samples.astype(np.float32),
                     sample_rate,
                     response_format,
+                    use_pcm_jit=self.settings.jit,
                 )
             return
 

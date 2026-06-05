@@ -40,6 +40,7 @@ def _settings(**overrides):
         onnx_adain_custom_op_library=None,
         warmup_multi_shape=False,
         onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        jit=False,
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
@@ -108,6 +109,7 @@ def _engine(settings):
         "input_ids" if "input_ids" in engine._onnx_input_names else "tokens"
     )
     engine._onnx_input_buffers = local()
+    engine._output_buffers = local()
     return engine
 
 
@@ -335,6 +337,38 @@ def test_warm_ttfc_shape_buckets_runs_selected_shapes():
     engine._warm_ttfc_shape_buckets()
 
     assert runs == [6, 8]
+
+
+def test_create_samples_with_buffer_pool_grows_and_merges(monkeypatch):
+    engine = _engine(_settings())
+    parts = iter(
+        [
+            np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            np.array([4.0, 5.0], dtype=np.float32),
+            np.array([6.0, 7.0, 8.0, 9.0], dtype=np.float32),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "fastkokoro.engine.split_phonemes_for_model",
+        lambda _: ["p1", "p2", "p3"],
+    )
+    engine._run_onnx_audio = lambda *_args, **_kwargs: next(parts)
+
+    samples, sample_rate = engine._create_samples(
+        "unused",
+        voice=engine._voice_styles["af_heart"],
+        speed=1.0,
+        lang="en-us",
+        is_phonemes=True,
+        trim=False,
+    )
+
+    np.testing.assert_array_equal(
+        samples,
+        np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], dtype=np.float32),
+    )
+    assert sample_rate == 24000
 
 
 def test_create_can_run_with_iobinding():

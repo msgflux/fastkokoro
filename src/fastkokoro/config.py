@@ -27,6 +27,7 @@ DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_ONNX_ADAIN_FUSION = False
 DEFAULT_WARMUP_MULTI_SHAPE = False
 DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 8, 9, 10, 11, 12, 16, 24)
+DEFAULT_JIT = True
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "chunk"
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
@@ -74,6 +75,7 @@ class Settings:
     onnx_adain_custom_op_library: Path | None
     warmup_multi_shape: bool
     onnx_ttfc_shape_buckets: tuple[int, ...]
+    jit: bool
     warmup: bool
     warmup_text: str
     stream_strategy: str
@@ -184,9 +186,14 @@ class Settings:
                 default=DEFAULT_WARMUP_MULTI_SHAPE,
             ),
             onnx_ttfc_shape_buckets=parse_int_csv(
-                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS")
+                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS"),
+                name="FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS",
             )
             or DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
+            jit=parse_bool(
+                os.getenv("FASTKOKORO_JIT"),
+                default=DEFAULT_JIT,
+            ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
             stream_strategy=parse_stream_strategy(
@@ -270,7 +277,7 @@ def parse_provider_options(value: str | None) -> dict[str, dict[str, str]]:
     return options
 
 
-def parse_int_csv(value: str | None) -> tuple[int, ...]:
+def parse_int_csv(value: str | None, *, name: str) -> tuple[int, ...]:
     if not value:
         return ()
     parsed = []
@@ -280,7 +287,7 @@ def parse_int_csv(value: str | None) -> tuple[int, ...]:
             continue
         integer = int(candidate)
         if integer <= 0:
-            raise ValueError("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS must be positive")
+            raise ValueError(f"{name} must be positive")
         parsed.append(integer)
     return tuple(sorted(set(parsed)))
 

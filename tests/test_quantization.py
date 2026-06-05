@@ -36,6 +36,7 @@ def _settings(**overrides):
         onnx_adain_custom_op_library=None,
         warmup_multi_shape=False,
         onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        jit=False,
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
