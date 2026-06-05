@@ -14,10 +14,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3.12 python3.12-venv ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN uv sync --frozen --no-dev --extra gpu
+RUN uv venv .venv \
+    && uv pip install --python .venv ".[gpu]"
 
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS runtime
 
