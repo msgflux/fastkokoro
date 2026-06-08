@@ -208,6 +208,11 @@ smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
 path directly.
 
+Inline pause tokens can be embedded in input text. `[pause:1.5s]` inserts 1.5
+seconds of silence without running the model for that segment. The form is
+strict: colon, numeric seconds, trailing `s`, and square brackets. Other forms
+such as `[pause=1.5]` or SSML `<break/>` are treated as normal text.
+
 The default ONNX Runtime thread settings prioritize low CPU latency. Set
 `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` or
 `FASTKOKORO_ONNX_INTER_OP_NUM_THREADS` to an empty value to use ONNX Runtime's

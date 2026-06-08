@@ -29,6 +29,7 @@ from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
 OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
+PAUSE_TAG_PATTERN = re.compile(r"\[pause:(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
 PHONEME_BREAK_PRIORITY = ("!.?\u2026", ":;", ",\u2014")
 
@@ -38,6 +39,12 @@ class OnnxInputBuffers:
     token_ids: np.ndarray
     speed_float32: np.ndarray
     speed_int32: np.ndarray
+
+
+@dataclass(frozen=True)
+class TextControlSegment:
+    text: str = ""
+    pause_seconds: float | None = None
 
 
 class FastKokoro:
@@ -158,23 +165,39 @@ class FastKokoro:
     ) -> tuple[np.ndarray, int]:
         assert 0.5 <= speed <= 2.0, "Speed should be between 0.5 and 2.0"
 
-        phonemes = text if is_phonemes else self.kokoro.tokenizer.phonemize(text, lang)
-        phoneme_batches = split_phonemes_for_model(phonemes)
-        if not phoneme_batches:
+        segments = (
+            [TextControlSegment(text=text)]
+            if is_phonemes
+            else split_text_control_segments(text)
+        )
+        if not segments:
             return np.array([], dtype=np.float32), SAMPLE_RATE
 
-        initial_size = self._select_output_buffer_size(len(phoneme_batches) * 4096)
+        initial_size = self._select_output_buffer_size(len(segments) * 4096)
         merged = self._acquire_output_buffer(initial_size)
         merged_length = 0
-        for phoneme_batch in phoneme_batches:
-            audio_part = self._run_onnx_audio(phoneme_batch, voice, speed)
-            if trim:
-                audio_part = self._trim_audio_part(audio_part)
-            required = merged_length + len(audio_part)
-            if required > len(merged):
-                merged = self._grow_output_buffer(merged, merged_length, required)
-            merged[merged_length:required] = audio_part
-            merged_length = required
+        for segment in segments:
+            if segment.pause_seconds is not None:
+                audio_parts = [silence_samples(segment.pause_seconds)]
+            else:
+                phonemes = (
+                    segment.text
+                    if is_phonemes
+                    else self.kokoro.tokenizer.phonemize(segment.text, lang)
+                )
+                audio_parts = [
+                    self._run_onnx_audio(phoneme_batch, voice, speed)
+                    for phoneme_batch in split_phonemes_for_model(phonemes)
+                ]
+
+            for audio_part in audio_parts:
+                if trim and segment.pause_seconds is None:
+                    audio_part = self._trim_audio_part(audio_part)
+                required = merged_length + len(audio_part)
+                if required > len(merged):
+                    merged = self._grow_output_buffer(merged, merged_length, required)
+                merged[merged_length:required] = audio_part
+                merged_length = required
 
         return merged[:merged_length], SAMPLE_RATE
 
@@ -344,43 +367,55 @@ class FastKokoro:
         resolved_voice, resolved_lang = self.resolve_request(voice, lang)
 
         if self.settings.stream_strategy == "kokoro":
-            stream = self.kokoro.create_stream(
-                text,
-                voice=resolved_voice,
-                speed=speed,
-                lang=resolved_lang,
-            )
-            async for samples, sample_rate in stream:
-                yield encode_audio(
-                    samples.astype(np.float32),
-                    sample_rate,
+            for segment in split_text_control_segments(text):
+                if segment.pause_seconds is not None:
+                    audio = encode_audio(
+                        silence_samples(segment.pause_seconds),
+                        SAMPLE_RATE,
+                        response_format,
+                        use_pcm_jit=self.settings.jit,
+                    )
+                    if response_format == "pcm":
+                        for frame in split_pcm_frames(
+                            audio,
+                            self.settings.stream_audio_frame_ms,
+                        ):
+                            yield frame
+                    else:
+                        yield audio
+                    continue
+
+                stream = self.kokoro.create_stream(
+                    segment.text,
+                    voice=resolved_voice,
+                    speed=speed,
+                    lang=resolved_lang,
+                )
+                async for samples, sample_rate in stream:
+                    yield encode_audio(
+                        samples.astype(np.float32),
+                        sample_rate,
+                        response_format,
+                        use_pcm_jit=self.settings.jit,
+                    )
+            return
+
+        for segment in self._stream_text_control_segments(text):
+            if segment.pause_seconds is None:
+                audio = self._create_resolved(
+                    segment.text,
+                    voice=resolved_voice,
+                    speed=speed,
+                    response_format=response_format,
+                    lang=resolved_lang,
+                )
+            else:
+                audio = encode_audio(
+                    silence_samples(segment.pause_seconds),
+                    SAMPLE_RATE,
                     response_format,
                     use_pcm_jit=self.settings.jit,
                 )
-            return
-
-        if self.settings.stream_strategy == "chunk":
-            max_chars, max_words = self._stream_schedule_limits()
-            segments = split_scheduled_chunks(
-                text,
-                initial_max_chars=self.settings.stream_max_segment_chars,
-                initial_max_words=self.settings.stream_max_segment_words,
-                max_chars=max_chars,
-                max_words=max_words,
-            )
-        elif self.settings.stream_strategy == "phrase":
-            segments = split_phrases(text)
-        else:
-            segments = split_sentences(text)
-
-        for segment in segments:
-            audio = self._create_resolved(
-                segment,
-                voice=resolved_voice,
-                speed=speed,
-                response_format=response_format,
-                lang=resolved_lang,
-            )
             if response_format != "pcm":
                 yield audio
                 continue
@@ -402,6 +437,51 @@ class FastKokoro:
             self.settings.stream_cpu_schedule_max_segment_chars,
             self.settings.stream_cpu_schedule_max_segment_words,
         )
+
+    def _stream_text_control_segments(self, text: str) -> list[TextControlSegment]:
+        segments: list[TextControlSegment] = []
+        for segment in split_text_control_segments(text):
+            if segment.pause_seconds is not None:
+                segments.append(segment)
+                continue
+
+            if self.settings.stream_strategy == "chunk":
+                max_chars, max_words = self._stream_schedule_limits()
+                text_segments = split_scheduled_chunks(
+                    segment.text,
+                    initial_max_chars=self.settings.stream_max_segment_chars,
+                    initial_max_words=self.settings.stream_max_segment_words,
+                    max_chars=max_chars,
+                    max_words=max_words,
+                )
+            elif self.settings.stream_strategy == "phrase":
+                text_segments = split_phrases(segment.text)
+            else:
+                text_segments = split_sentences(segment.text)
+
+            segments.extend(TextControlSegment(text=item) for item in text_segments)
+        return segments
+
+
+def silence_samples(seconds: float) -> np.ndarray:
+    sample_count = max(0, int(seconds * SAMPLE_RATE))
+    return np.zeros(sample_count, dtype=np.float32)
+
+
+def split_text_control_segments(text: str) -> list[TextControlSegment]:
+    segments: list[TextControlSegment] = []
+    parts = PAUSE_TAG_PATTERN.split(text)
+    for index, part in enumerate(parts):
+        if index % 2 == 0:
+            stripped = part.strip()
+            if stripped:
+                segments.append(TextControlSegment(text=stripped))
+            continue
+
+        seconds = float(part)
+        if seconds > 0:
+            segments.append(TextControlSegment(pause_seconds=seconds))
+    return segments
 
 
 def split_phonemes_for_model(phonemes: str) -> list[str]:
