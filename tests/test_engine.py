@@ -323,6 +323,51 @@ def test_create_reuses_preallocated_token_inputs():
     assert second_tokens.shape == (1, 8)
 
 
+def test_create_inserts_pause_silence_without_model_call():
+    engine = _engine(_settings())
+
+    audio = engine.create(
+        "Hi [pause:0.5s] bye",
+        voice="af_heart",
+        lang="en-us",
+        response_format="pcm",
+    )
+
+    assert engine.kokoro.created_texts == ["Hi", "bye"]
+    assert len(audio) == (48 + 12000 + 48) * 2
+
+
+def test_invalid_pause_tag_is_read_as_text():
+    engine = _engine(_settings())
+
+    engine.create(
+        "Hi [pause=0.5] bye",
+        voice="af_heart",
+        lang="en-us",
+        response_format="pcm",
+    )
+
+    assert engine.kokoro.created_texts == ["Hi [pause=0.5] bye"]
+
+
+@pytest.mark.asyncio
+async def test_stream_inserts_pause_silence():
+    engine = _engine(_settings(stream_strategy="phrase", stream_audio_frame_ms=1))
+
+    chunks = [
+        chunk
+        async for chunk in engine.create_stream(
+            "Hi [pause:0.001s] bye",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert engine.kokoro.created_texts == ["Hi", "bye"]
+    assert [len(chunk) for chunk in chunks] == [48, 48, 48, 48, 48]
+
+
 def test_warm_ttfc_shape_buckets_runs_selected_shapes():
     runs = []
     engine = _engine(
