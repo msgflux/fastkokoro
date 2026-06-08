@@ -29,6 +29,8 @@ from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
 OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
+PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
+PHONEME_BREAK_PRIORITY = ("!.?\u2026", ":;", ",\u2014")
 
 
 @dataclass
@@ -403,7 +405,7 @@ class FastKokoro:
 
 
 def split_phonemes_for_model(phonemes: str) -> list[str]:
-    parts = re.split(r"([.,!?;])", phonemes)
+    parts = re.split(r"([.,!?;:\u2026\u2014])", phonemes)
     batches: list[str] = []
     current_batch = ""
 
@@ -413,10 +415,13 @@ def split_phonemes_for_model(phonemes: str) -> list[str]:
             continue
         if len(current_batch) + len(part) + 1 >= MAX_PHONEME_LENGTH:
             if current_batch:
-                batches.append(current_batch.strip())
-            current_batch = part
+                batches.extend(_split_oversized_phoneme_batch(current_batch.strip()))
+                current_batch = part
+            else:
+                batches.extend(_split_oversized_phoneme_batch(part.strip()))
+                current_batch = ""
             continue
-        if part in ".,!?;":
+        if part in PHONEME_PUNCTUATION:
             current_batch += part
         else:
             if current_batch:
@@ -424,5 +429,32 @@ def split_phonemes_for_model(phonemes: str) -> list[str]:
             current_batch += part
 
     if current_batch:
-        batches.append(current_batch.strip())
+        batches.extend(_split_oversized_phoneme_batch(current_batch.strip()))
     return batches
+
+
+def _split_oversized_phoneme_batch(batch: str) -> list[str]:
+    if len(batch) <= MAX_PHONEME_LENGTH:
+        return [batch]
+
+    output: list[str] = []
+    remaining = batch
+    while len(remaining) > MAX_PHONEME_LENGTH:
+        boundary = _find_phoneme_split_boundary(remaining, MAX_PHONEME_LENGTH)
+        output.append(remaining[:boundary].strip())
+        remaining = remaining[boundary:].strip()
+    if remaining:
+        output.append(remaining)
+    return output
+
+
+def _find_phoneme_split_boundary(text: str, limit: int) -> int:
+    window = text[:limit]
+    for punctuation_group in PHONEME_BREAK_PRIORITY:
+        boundary = max(window.rfind(char) for char in punctuation_group)
+        if boundary >= 0:
+            return boundary + 1
+    whitespace = window.rfind(" ")
+    if whitespace > 0:
+        return whitespace + 1
+    return limit

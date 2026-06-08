@@ -492,3 +492,20 @@ def test_split_phonemes_for_model_prefers_punctuation_boundaries():
     batches = split_phonemes_for_model(phonemes)
 
     assert batches == ["a" * 500 + ".", "b" * 20]
+
+
+def test_split_phonemes_for_model_uses_mlx_punctuation_priority():
+    phonemes = ("a" * 250) + ", " + ("b" * 249) + "? " + ("c" * 20)
+
+    batches = split_phonemes_for_model(phonemes)
+
+    assert batches == [("a" * 250) + ", " + ("b" * 249) + "?", "c" * 20]
+
+
+def test_split_phonemes_for_model_splits_oversized_unpunctuated_text():
+    phonemes = "a" * 700
+
+    batches = split_phonemes_for_model(phonemes)
+
+    assert "".join(batches) == phonemes
+    assert all(len(batch) <= 510 for batch in batches)
