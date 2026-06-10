@@ -33,6 +33,8 @@ PAUSE_TAG_PATTERN = re.compile(r"\[pause:(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
 PHONEME_BREAK_PRIORITY = ("!.?\u2026", ":;", ",\u2014")
 
+_PHONEMIZE_CACHE_MAXSIZE = 128
+
 
 @dataclass
 class OnnxInputBuffers:
@@ -75,6 +77,7 @@ class FastKokoro:
         )
         self._onnx_input_buffers = threading.local()
         self._output_buffers = threading.local()
+        self._phonemize_cache: dict[tuple[str, str], str] = {}
         self._warm_ttfc_shape_buckets()
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
@@ -95,6 +98,17 @@ class FastKokoro:
 
     def voices(self) -> list[str]:
         return list(self._voices)
+
+    def _phonemize_cached(self, text: str, lang: str) -> str:
+        key = (text, lang)
+        cache = self._phonemize_cache
+        if key in cache:
+            return cache[key]
+        result = self.kokoro.tokenizer.phonemize(text, lang)
+        if len(cache) >= _PHONEMIZE_CACHE_MAXSIZE:
+            cache.pop(next(iter(cache)))
+        cache[key] = result
+        return result
 
     def warmup(self) -> None:
         self.create(
@@ -183,7 +197,7 @@ class FastKokoro:
                 phonemes = (
                     segment.text
                     if is_phonemes
-                    else self.kokoro.tokenizer.phonemize(segment.text, lang)
+                    else self._phonemize_cached(segment.text, lang)
                 )
                 audio_parts = [
                     self._run_onnx_audio(phoneme_batch, voice, speed)
@@ -261,7 +275,9 @@ class FastKokoro:
             return
 
         voice = self._voice_styles[self.settings.default_voice]
+        lang = self.settings.default_lang
         warmed: list[int] = []
+
         for bucket in self.settings.onnx_ttfc_shape_buckets:
             token_count = bucket - 2
             if token_count <= 0 or token_count > MAX_PHONEME_LENGTH:
@@ -271,8 +287,42 @@ class FastKokoro:
             inputs = self._build_onnx_inputs([0] * token_count, voice, 1.0)
             self.session.run(None, inputs)
             warmed.append(bucket)
+
+        if self.settings.stream_strategy in {"chunk", "phrase", "sentence"}:
+            strategy_buckets = self._warm_streaming_first_segments(voice, lang)
+            warmed.extend(strategy_buckets)
+
         if warmed:
             logger.info("Warmed ONNX TTFC shape buckets: buckets=%s", warmed)
+
+    def _warm_streaming_first_segments(self, voice: np.ndarray, lang: str) -> list[int]:
+        warmed: list[int] = []
+        sample_texts = [
+            "Ola,",
+            "Hello,",
+            "Hola,",
+            "Bonjour,",
+            "Ciao,",
+        ]
+        for text in sample_texts:
+            try:
+                phonemes = self.kokoro.tokenizer.phonemize(text, lang)
+                batches = split_phonemes_for_model(phonemes)
+                for batch in batches:
+                    tokens = self.kokoro.tokenizer.tokenize(batch)
+                    token_count = len(tokens)
+                    if token_count <= 0 or token_count > MAX_PHONEME_LENGTH:
+                        continue
+                    if token_count >= len(voice):
+                        continue
+                    inputs = self._build_onnx_inputs([0] * token_count, voice, 1.0)
+                    self.session.run(None, inputs)
+                    bucket = token_count + 2
+                    if bucket not in warmed:
+                        warmed.append(bucket)
+            except Exception:
+                continue
+        return warmed
 
     def _run_onnx_audio_iobinding(self, inputs: dict[str, np.ndarray]) -> np.ndarray:
         device = self._resolve_iobinding_device()

@@ -27,7 +27,7 @@ DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_ONNX_ADAIN_FUSION = False
 DEFAULT_ONNX_CONV_ADAIN_FUSION = False
 DEFAULT_WARMUP_MULTI_SHAPE = False
-DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 8, 9, 10, 11, 12, 16, 24)
+DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
 DEFAULT_JIT = True
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "chunk"
@@ -131,7 +131,10 @@ class Settings:
             port=int(os.getenv("FASTKOKORO_PORT", str(DEFAULT_PORT))),
             onnx_providers=parse_csv(providers) or DEFAULT_ONNX_PROVIDERS,
             onnx_provider_options=parse_provider_options(provider_options),
-            onnx_auto_providers=parse_bool(os.getenv("FASTKOKORO_ONNX_AUTO_PROVIDERS")),
+            onnx_auto_providers=parse_bool(
+                os.getenv("FASTKOKORO_ONNX_AUTO_PROVIDERS"),
+                default=True,
+            ),
             onnx_intra_op_num_threads=parse_optional_int(
                 os.getenv(
                     "FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS",
