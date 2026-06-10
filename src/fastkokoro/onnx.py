@@ -9,6 +9,26 @@ from fastkokoro.config import Settings
 
 logger = logging.getLogger("uvicorn.error")
 
+
+def _check_gpu_shadowed() -> None:
+    """Check if onnxruntime-gpu is installed but shadowed by onnxruntime (CPU).
+
+    Both packages provide the same `onnxruntime` module. When both are installed,
+    the CPU version can shadow the GPU version, hiding CUDA providers.
+    """
+    try:
+        import importlib.metadata
+        importlib.metadata.distribution("onnxruntime-gpu")
+    except (importlib.metadata.PackageNotFoundError, ImportError):
+        return
+    if any(p.startswith(("CUDA", "TensorRT", "ROCM")) for p in ort.get_available_providers()):
+        return
+    logger.warning(
+        "onnxruntime-gpu is installed but no GPU providers detected. "
+        "onnxruntime (CPU) is likely shadowing it. "
+        "Run: pip uninstall onnxruntime -y"
+    )
+
 GRAPH_OPTIMIZATION_LEVELS = {
     "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
     "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
@@ -18,6 +38,7 @@ GRAPH_OPTIMIZATION_LEVELS = {
 
 
 def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession:
+    _check_gpu_shadowed()
     available = ort.get_available_providers()
     providers = (
         available if settings.onnx_auto_providers else list(settings.onnx_providers)
