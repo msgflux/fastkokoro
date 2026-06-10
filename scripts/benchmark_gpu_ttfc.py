@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-GPU TTFC Benchmark - PCM output.
-Run inside the Docker container with --gpus all.
+TTFC Benchmark - PCM output. Works on CPU and GPU.
+
+Usage:
+  # GPU (Colab/Docker)
+  python scripts/benchmark_gpu_ttfc.py --text short --iterations 5
+
+  # CPU (force CPUExecutionProvider)
+  FASTKOKORO_ONNX_AUTO_PROVIDERS=false python scripts/benchmark_gpu_ttfc.py --text short --iterations 3
 """
 
 from __future__ import annotations
@@ -100,8 +106,17 @@ def make_stream(
         segments = split_phrases(text)
     elif strategy == "adaptive":
         segments = []
+        providers = set(engine.session.get_providers())
+        has_gpu = bool(
+            {"CUDAExecutionProvider", "TensorrtExecutionProvider"} & providers
+        )
+        adaptive_max = (
+            engine.settings.stream_adaptive_max_chars
+            if has_gpu
+            else engine.settings.stream_adaptive_cpu_max_chars
+        )
         for sentence in split_sentences(text):
-            if len(sentence) <= engine.settings.stream_adaptive_max_chars:
+            if len(sentence) <= adaptive_max:
                 segments.append(sentence)
             else:
                 segments.extend(split_phrases(sentence))
