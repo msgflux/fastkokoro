@@ -111,7 +111,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
 
     assert settings.onnx_providers == ("CPUExecutionProvider",)
     assert settings.onnx_provider_options == {}
-    assert settings.onnx_auto_providers is False
+    assert settings.onnx_auto_providers is True
     assert settings.onnx_intra_op_num_threads == DEFAULT_ONNX_INTRA_OP_NUM_THREADS
     assert settings.onnx_inter_op_num_threads == 1
     assert settings.onnx_graph_optimization_level == (
