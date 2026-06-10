@@ -98,6 +98,13 @@ def make_stream(
         )
     elif strategy == "phrase":
         segments = split_phrases(text)
+    elif strategy == "adaptive":
+        segments = []
+        for sentence in split_sentences(text):
+            if len(sentence) <= engine.settings.stream_adaptive_max_chars:
+                segments.append(sentence)
+            else:
+                segments.extend(split_phrases(sentence))
     else:
         segments = split_sentences(text)
 
@@ -145,7 +152,7 @@ async def main():
 
     all_results = []
 
-    for strategy in ["kokoro", "sentence", "phrase", "chunk"]:
+        for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
         print(f"===== {strategy.upper()} =====", flush=True)
         for i in range(args.iterations):
             stream = make_stream(
@@ -181,7 +188,7 @@ async def main():
 
     if not args.json:
         print("========== FINAL SUMMARY ==========", flush=True)
-        for strategy in ["kokoro", "sentence", "phrase", "chunk"]:
+    for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
             sr = [r for r in all_results if r.strategy.startswith(strategy)]
             ttfcs = [r.first_chunk_latency_seconds for r in sr]
             tots = [r.total_latency_seconds for r in sr]
