@@ -70,6 +70,8 @@ def settings(**overrides):
         warmup=False,
         warmup_text="hello",
         stream_strategy="sentence",
+        stream_adaptive_max_chars=50,
+        stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=200,
         stream_max_segment_chars=80,
         stream_max_segment_words=12,

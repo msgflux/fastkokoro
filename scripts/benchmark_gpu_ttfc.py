@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-GPU TTFC Benchmark - PCM output.
-Run inside the Docker container with --gpus all.
+TTFC Benchmark - PCM output. Works on CPU and GPU.
+
+Usage:
+  # GPU (Colab/Docker)
+  python scripts/benchmark_gpu_ttfc.py --text short --iterations 5
+
+  # CPU (force CPUExecutionProvider)
+  FASTKOKORO_ONNX_AUTO_PROVIDERS=false python scripts/benchmark_gpu_ttfc.py --text short --iterations 3
 """
 
 from __future__ import annotations
@@ -98,6 +104,22 @@ def make_stream(
         )
     elif strategy == "phrase":
         segments = split_phrases(text)
+    elif strategy == "adaptive":
+        segments = []
+        providers = set(engine.session.get_providers())
+        has_gpu = bool(
+            {"CUDAExecutionProvider", "TensorrtExecutionProvider"} & providers
+        )
+        adaptive_max = (
+            engine.settings.stream_adaptive_max_chars
+            if has_gpu
+            else engine.settings.stream_adaptive_cpu_max_chars
+        )
+        for sentence in split_sentences(text):
+            if len(sentence) <= adaptive_max:
+                segments.append(sentence)
+            else:
+                segments.extend(split_phrases(sentence))
     else:
         segments = split_sentences(text)
 
@@ -145,7 +167,7 @@ async def main():
 
     all_results = []
 
-    for strategy in ["kokoro", "sentence", "phrase", "chunk"]:
+    for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
         print(f"===== {strategy.upper()} =====", flush=True)
         for i in range(args.iterations):
             stream = make_stream(
@@ -181,7 +203,7 @@ async def main():
 
     if not args.json:
         print("========== FINAL SUMMARY ==========", flush=True)
-        for strategy in ["kokoro", "sentence", "phrase", "chunk"]:
+        for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
             sr = [r for r in all_results if r.strategy.startswith(strategy)]
             ttfcs = [r.first_chunk_latency_seconds for r in sr]
             tots = [r.total_latency_seconds for r in sr]

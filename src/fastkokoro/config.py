@@ -30,7 +30,9 @@ DEFAULT_WARMUP_MULTI_SHAPE = False
 DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
 DEFAULT_JIT = True
 DEFAULT_WARMUP_TEXT = "hello"
-DEFAULT_STREAM_STRATEGY = "chunk"
+DEFAULT_STREAM_STRATEGY = "adaptive"
+DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
+DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 DEFAULT_STREAM_MAX_SEGMENT_CHARS = 32
 DEFAULT_STREAM_MAX_SEGMENT_WORDS = 2
@@ -42,7 +44,7 @@ DEFAULT_CORS_ALLOW_ORIGINS = ("*",)
 DEFAULT_CORS_ALLOW_METHODS = ("GET", "POST", "OPTIONS")
 DEFAULT_CORS_ALLOW_HEADERS = ("*",)
 SAMPLE_RATE = 24000
-STREAM_STRATEGIES = {"chunk", "kokoro", "phrase", "sentence"}
+STREAM_STRATEGIES = {"adaptive", "chunk", "kokoro", "phrase", "sentence"}
 ONNX_GRAPH_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
 ONNX_IO_BINDING_DEVICES = {"auto", "cpu", "cuda"}
 ONNX_WEIGHT_ONLY_NBITS = {4, 8}
@@ -91,6 +93,8 @@ class Settings:
     stream_max_segment_words: int
     stream_schedule_max_segment_chars: int
     stream_schedule_max_segment_words: int
+    stream_adaptive_max_chars: int
+    stream_adaptive_cpu_max_chars: int
     stream_cpu_schedule_max_segment_chars: int
     stream_cpu_schedule_max_segment_words: int
     cors_allow_origins: tuple[str, ...]
@@ -233,6 +237,20 @@ class Settings:
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
             stream_strategy=parse_stream_strategy(
                 os.getenv("FASTKOKORO_STREAM_STRATEGY", DEFAULT_STREAM_STRATEGY)
+            ),
+            stream_adaptive_max_chars=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_ADAPTIVE_MAX_CHARS",
+                    str(DEFAULT_STREAM_ADAPTIVE_MAX_CHARS),
+                ),
+                name="FASTKOKORO_STREAM_ADAPTIVE_MAX_CHARS",
+            ),
+            stream_adaptive_cpu_max_chars=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_ADAPTIVE_CPU_MAX_CHARS",
+                    str(DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS),
+                ),
+                name="FASTKOKORO_STREAM_ADAPTIVE_CPU_MAX_CHARS",
             ),
             stream_audio_frame_ms=parse_positive_int(
                 os.getenv(
