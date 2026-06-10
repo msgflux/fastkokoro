@@ -506,6 +506,14 @@ class FastKokoro:
                 )
             elif self.settings.stream_strategy == "phrase":
                 text_segments = split_phrases(segment.text)
+            elif self.settings.stream_strategy == "adaptive":
+                text_segments = []
+                adaptive_max = self.settings.stream_adaptive_max_chars
+                for sentence in split_sentences(segment.text):
+                    if len(sentence) <= adaptive_max:
+                        text_segments.append(sentence)
+                    else:
+                        text_segments.extend(split_phrases(sentence))
             else:
                 text_segments = split_sentences(segment.text)
 
