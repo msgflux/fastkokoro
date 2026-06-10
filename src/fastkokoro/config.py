@@ -32,6 +32,7 @@ DEFAULT_JIT = True
 DEFAULT_WARMUP_TEXT = "hello"
 DEFAULT_STREAM_STRATEGY = "adaptive"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
+DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 25
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
 DEFAULT_STREAM_MAX_SEGMENT_CHARS = 32
 DEFAULT_STREAM_MAX_SEGMENT_WORDS = 2
@@ -93,6 +94,7 @@ class Settings:
     stream_schedule_max_segment_chars: int
     stream_schedule_max_segment_words: int
     stream_adaptive_max_chars: int
+    stream_adaptive_cpu_max_chars: int
     stream_cpu_schedule_max_segment_chars: int
     stream_cpu_schedule_max_segment_words: int
     cors_allow_origins: tuple[str, ...]
@@ -242,6 +244,13 @@ class Settings:
                     str(DEFAULT_STREAM_ADAPTIVE_MAX_CHARS),
                 ),
                 name="FASTKOKORO_STREAM_ADAPTIVE_MAX_CHARS",
+            ),
+            stream_adaptive_cpu_max_chars=parse_positive_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_ADAPTIVE_CPU_MAX_CHARS",
+                    str(DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS),
+                ),
+                name="FASTKOKORO_STREAM_ADAPTIVE_CPU_MAX_CHARS",
             ),
             stream_audio_frame_ms=parse_positive_int(
                 os.getenv(

@@ -508,7 +508,15 @@ class FastKokoro:
                 text_segments = split_phrases(segment.text)
             elif self.settings.stream_strategy == "adaptive":
                 text_segments = []
-                adaptive_max = self.settings.stream_adaptive_max_chars
+                providers = set(self.session.get_providers())
+                has_gpu = bool(
+                    {"CUDAExecutionProvider", "TensorrtExecutionProvider"} & providers
+                )
+                adaptive_max = (
+                    self.settings.stream_adaptive_max_chars
+                    if has_gpu
+                    else self.settings.stream_adaptive_cpu_max_chars
+                )
                 for sentence in split_sentences(segment.text):
                     if len(sentence) <= adaptive_max:
                         text_segments.append(sentence)
