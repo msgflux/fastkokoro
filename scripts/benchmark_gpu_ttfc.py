@@ -167,7 +167,7 @@ async def main():
 
     all_results = []
 
-        for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
+    for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
         print(f"===== {strategy.upper()} =====", flush=True)
         for i in range(args.iterations):
             stream = make_stream(
@@ -203,7 +203,7 @@ async def main():
 
     if not args.json:
         print("========== FINAL SUMMARY ==========", flush=True)
-    for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
+        for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
             sr = [r for r in all_results if r.strategy.startswith(strategy)]
             ttfcs = [r.first_chunk_latency_seconds for r in sr]
             tots = [r.total_latency_seconds for r in sr]
