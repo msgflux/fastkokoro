@@ -11,11 +11,6 @@ logger = logging.getLogger("uvicorn.error")
 
 
 def _check_gpu_shadowed() -> None:
-    """Check if onnxruntime-gpu is installed but shadowed by onnxruntime (CPU).
-
-    Both packages provide the same `onnxruntime` module. When both are installed,
-    the CPU version can shadow the GPU version, hiding CUDA providers.
-    """
     try:
         import importlib.metadata
         importlib.metadata.distribution("onnxruntime-gpu")
@@ -24,9 +19,8 @@ def _check_gpu_shadowed() -> None:
     if any(p.startswith(("CUDA", "TensorRT", "ROCM")) for p in ort.get_available_providers()):
         return
     logger.warning(
-        "onnxruntime-gpu is installed but no GPU providers detected. "
-        "onnxruntime (CPU) is likely shadowing it. "
-        "Run: pip uninstall onnxruntime -y"
+        "onnxruntime-gpu installed but GPU providers not detected. "
+        "Run: pip install --upgrade --force-reinstall --no-deps onnxruntime-gpu"
     )
 
 GRAPH_OPTIMIZATION_LEVELS = {
