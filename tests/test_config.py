@@ -130,7 +130,9 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
     assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
     assert settings.jit == DEFAULT_JIT
-    assert settings.stream_strategy == "chunk"
+    assert settings.stream_strategy == "adaptive"
+    assert settings.stream_adaptive_max_chars == 50
+    assert settings.stream_adaptive_cpu_max_chars == 12
     assert settings.stream_max_segment_chars == 32
     assert settings.stream_max_segment_words == 2
     assert settings.stream_schedule_max_segment_chars == 96
