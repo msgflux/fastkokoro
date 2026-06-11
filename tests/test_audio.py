@@ -21,15 +21,19 @@ def test_encode_audio_pcm_jit_matches_numpy():
     assert encoded_jit == encoded_numpy
 
 
-def test_trim_audio_part_jit_trims_leading_and_trailing_silence():
-    samples = np.array([0.0, 0.0, 0.02, 0.5, 0.03, 0.0, 0.0], dtype=np.float32)
-
-    trimmed = trim_audio_part(samples, use_jit=True)
-
-    np.testing.assert_array_equal(
-        trimmed,
-        np.array([0.02, 0.5, 0.03], dtype=np.float32),
+def test_trim_audio_part_jit_matches_numpy_frame_rms_path():
+    samples = np.concatenate(
+        [
+            np.zeros(2048, dtype=np.float32),
+            np.linspace(0.0, 0.5, 4096, dtype=np.float32),
+            np.zeros(2048, dtype=np.float32),
+        ]
     )
+
+    trimmed_jit = trim_audio_part(samples, use_jit=True)
+    trimmed_numpy = trim_audio_part(samples, use_jit=False)
+
+    np.testing.assert_array_equal(trimmed_jit, trimmed_numpy)
 
 
 def test_trim_audio_part_numpy_path_uses_kokoro_trim():

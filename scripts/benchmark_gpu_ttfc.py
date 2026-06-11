@@ -7,7 +7,8 @@ Usage:
   python scripts/benchmark_gpu_ttfc.py --text short --iterations 5
 
   # CPU (force CPUExecutionProvider)
-  FASTKOKORO_ONNX_AUTO_PROVIDERS=false python scripts/benchmark_gpu_ttfc.py --text short --iterations 3
+  FASTKOKORO_ONNX_AUTO_PROVIDERS=false \
+    python scripts/benchmark_gpu_ttfc.py --text short --iterations 3
 """
 
 from __future__ import annotations
@@ -16,19 +17,25 @@ import argparse
 import asyncio
 import json
 import time
-from statistics import fmean, median
 from dataclasses import asdict, dataclass
-from collections.abc import AsyncGenerator
+from statistics import fmean, median
 
 from fastkokoro.engine import FastKokoro
-from fastkokoro.streaming import split_pcm_frames, split_sentences, split_phrases
-from fastkokoro.audio import encode_audio
+from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
 
 TEXTS = {
     "tiny": "Hello.",
     "short": "Hello, how are you?",
-    "medium": "Hello, how are you? This is a test of speech synthesis. We are measuring latency to first chunk and total generation time.",
-    "long": "Hello, how are you? This is a test of speech synthesis. We are measuring latency to first chunk and total generation time. For streaming in a terminal interface, the ideal is to deliver audio early, without waiting for the entire text to be processed.",
+    "medium": (
+        "Hello, how are you? This is a test of speech synthesis. We are "
+        "measuring latency to first chunk and total generation time."
+    ),
+    "long": (
+        "Hello, how are you? This is a test of speech synthesis. We are "
+        "measuring latency to first chunk and total generation time. For "
+        "streaming in a terminal interface, the ideal is to deliver audio early, "
+        "without waiting for the entire text to be processed."
+    ),
 }
 
 
@@ -77,19 +84,6 @@ def make_stream(
     frame_ms: int,
 ):
     resolved_voice, resolved_lang = engine.resolve_request(voice, lang)
-
-    if strategy == "kokoro":
-        s = engine.kokoro.create_stream(
-            text, voice=resolved_voice, speed=speed, lang=resolved_lang
-        )
-
-        async def gen():
-            async for samples, sr in s:
-                yield encode_audio(
-                    samples.astype("f4"), sr, "pcm", use_pcm_jit=engine.settings.jit
-                )
-
-        return gen()
 
     if strategy == "chunk":
         from fastkokoro.streaming import split_scheduled_chunks
@@ -167,24 +161,33 @@ async def main():
 
     all_results = []
 
-    for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
+    for strategy in ["sentence", "adaptive", "phrase", "chunk"]:
         print(f"===== {strategy.upper()} =====", flush=True)
         for i in range(args.iterations):
             stream = make_stream(
-                engine, strategy, text, args.voice, args.lang, args.speed, args.frame_ms
+                engine,
+                strategy,
+                text,
+                args.voice,
+                args.lang,
+                args.speed,
+                args.frame_ms,
             )
             r = await measure(
                 stream,
                 engine,
                 text,
-                f"{strategy}_{label}" if strategy != "kokoro" else strategy,
+                f"{strategy}_{label}",
                 args.text,
             )
             all_results.append(r)
             if args.json:
                 print(json.dumps(asdict(r)), flush=True)
             print(
-                f"  [{i + 1}/{args.iterations}]  TTFC={r.first_chunk_latency_seconds:.4f}s  Total={r.total_latency_seconds:.4f}s  Chunks={r.chunks}  Bytes={r.bytes}",
+                f"  [{i + 1}/{args.iterations}]  "
+                f"TTFC={r.first_chunk_latency_seconds:.4f}s  "
+                f"Total={r.total_latency_seconds:.4f}s  "
+                f"Chunks={r.chunks}  Bytes={r.bytes}",
                 flush=True,
             )
 
@@ -192,7 +195,8 @@ async def main():
         ttfcs = [r.first_chunk_latency_seconds for r in sr]
         tots = [r.total_latency_seconds for r in sr]
         print(
-            f"  > AVG:   TTFC={fmean(ttfcs):.4f}s  Total={fmean(tots):.4f}s", flush=True
+            f"  > AVG:   TTFC={fmean(ttfcs):.4f}s  Total={fmean(tots):.4f}s",
+            flush=True,
         )
         print(
             f"  > P50:   TTFC={median(ttfcs):.4f}s  Total={median(tots):.4f}s",
@@ -203,12 +207,17 @@ async def main():
 
     if not args.json:
         print("========== FINAL SUMMARY ==========", flush=True)
-        for strategy in ["kokoro", "sentence", "adaptive", "phrase", "chunk"]:
+        for strategy in ["sentence", "adaptive", "phrase", "chunk"]:
             sr = [r for r in all_results if r.strategy.startswith(strategy)]
             ttfcs = [r.first_chunk_latency_seconds for r in sr]
             tots = [r.total_latency_seconds for r in sr]
             print(
-                f"{strategy:12s}  TTFC avg={fmean(ttfcs):.4f}s  p50={median(ttfcs):.4f}s  min={min(ttfcs):.4f}s  |  Total avg={fmean(tots):.4f}s  p50={median(tots):.4f}s",
+                f"{strategy:12s}  "
+                f"TTFC avg={fmean(ttfcs):.4f}s  "
+                f"p50={median(ttfcs):.4f}s  "
+                f"min={min(ttfcs):.4f}s  |  "
+                f"Total avg={fmean(tots):.4f}s  "
+                f"p50={median(tots):.4f}s",
                 flush=True,
             )
 

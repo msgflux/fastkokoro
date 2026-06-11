@@ -5,8 +5,24 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import fastkokoro.engine as engine_module
 from fastkokoro.config import Settings
 from fastkokoro.engine import FastKokoro, split_phonemes_for_model
+
+
+class FakeOrtValue:
+    @staticmethod
+    def ortvalue_from_numpy(value, device_type, device_id):
+        return value, device_type, device_id
+
+
+@pytest.fixture(autouse=True)
+def fake_engine_onnxruntime(monkeypatch):
+    monkeypatch.setattr(
+        engine_module,
+        "ort",
+        SimpleNamespace(OrtValue=FakeOrtValue),
+    )
 
 
 def _settings(**overrides):
@@ -152,7 +168,7 @@ async def test_sentence_stream_splits_text_and_pcm_frames():
 
 
 @pytest.mark.asyncio
-async def test_kokoro_stream_strategy_uses_upstream_stream():
+async def test_kokoro_stream_strategy_uses_local_engine_path():
     engine = _engine(_settings(stream_strategy="kokoro"))
 
     chunks = [
@@ -165,7 +181,7 @@ async def test_kokoro_stream_strategy_uses_upstream_stream():
         )
     ]
 
-    assert engine.kokoro.created_texts == []
+    assert engine.kokoro.created_texts == ["Hello. World."]
     assert len(chunks) == 1
 
 

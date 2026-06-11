@@ -46,7 +46,7 @@ def resolve_voices_path(settings: Settings) -> Path:
 def convert_raw_voices_to_npz(
     voices_bin: Path, voices_index: Path, cache_dir: Path
 ) -> Path:
-    destination = cache_dir / "voices-kokoro-onnx.npz"
+    destination = cache_dir / "voices-fastkokoro.npz"
     if destination.exists():
         return destination
 

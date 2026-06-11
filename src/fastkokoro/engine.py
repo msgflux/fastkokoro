@@ -7,8 +7,11 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 import numpy as np
-import onnxruntime as ort
-from kokoro_onnx import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro
+
+try:
+    import onnxruntime as ort
+except ModuleNotFoundError:
+    ort = None
 
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part
@@ -17,6 +20,7 @@ from fastkokoro.graph_fusion import (
     resolve_adain_fused_model_path,
     resolve_conv_adain_fused_model_path,
 )
+from fastkokoro.kokoro import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro
 from fastkokoro.onnx import create_session
 from fastkokoro.quantization import resolve_quantized_model_path
 from fastkokoro.streaming import (
@@ -28,6 +32,22 @@ from fastkokoro.streaming import (
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _require_ort():
+    global ort
+    if ort is None:
+        try:
+            import onnxruntime as runtime
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "ONNX Runtime is not installed. Install `fastkokoro[gpu]` "
+                "to use CUDA IOBinding."
+            ) from exc
+        ort = runtime
+    return ort
+
+
 OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
 PAUSE_TAG_PATTERN = re.compile(r"\[pause:(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
@@ -357,9 +377,10 @@ class FastKokoro:
     def _run_onnx_audio_cuda_iobinding(
         self, inputs: dict[str, np.ndarray]
     ) -> np.ndarray:
+        runtime = _require_ort()
         binding = self.session.io_binding()
         for name, value in inputs.items():
-            ortvalue = ort.OrtValue.ortvalue_from_numpy(value, "cuda", 0)
+            ortvalue = runtime.OrtValue.ortvalue_from_numpy(value, "cuda", 0)
             binding.bind_ortvalue_input(name, ortvalue)
         binding.bind_output(self._onnx_output_name, device_type="cpu")
         self.session.run_with_iobinding(binding)
@@ -435,19 +456,18 @@ class FastKokoro:
                         yield audio
                     continue
 
-                stream = self.kokoro.create_stream(
+                samples, sample_rate = self._create_samples(
                     segment.text,
-                    voice=resolved_voice,
+                    voice=self._voice_styles[resolved_voice],
                     speed=speed,
                     lang=resolved_lang,
                 )
-                async for samples, sample_rate in stream:
-                    yield encode_audio(
-                        samples.astype(np.float32),
-                        sample_rate,
-                        response_format,
-                        use_pcm_jit=self.settings.jit,
-                    )
+                yield encode_audio(
+                    samples.astype(np.float32),
+                    sample_rate,
+                    response_format,
+                    use_pcm_jit=self.settings.jit,
+                )
             return
 
         for segment in self._stream_text_control_segments(text):

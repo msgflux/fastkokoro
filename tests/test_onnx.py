@@ -1,10 +1,51 @@
+import builtins
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
+
+
+class FakeSessionOptions:
+    def __init__(self):
+        self._registered_custom_ops_library = []
+        self.graph_optimization_level = None
+        self.log_severity_level = None
+        self.intra_op_num_threads = 0
+        self.inter_op_num_threads = 0
+
+    def register_custom_ops_library(self, path):
+        self._registered_custom_ops_library.append(path)
+
+
+class FakeRuntime:
+    GraphOptimizationLevel = SimpleNamespace(
+        ORT_DISABLE_ALL=SimpleNamespace(name="ORT_DISABLE_ALL"),
+        ORT_ENABLE_BASIC=SimpleNamespace(name="ORT_ENABLE_BASIC"),
+        ORT_ENABLE_EXTENDED=SimpleNamespace(name="ORT_ENABLE_EXTENDED"),
+        ORT_ENABLE_ALL=SimpleNamespace(name="ORT_ENABLE_ALL"),
+    )
+    SessionOptions = FakeSessionOptions
+
+    def get_available_providers(self):
+        return ["CPUExecutionProvider"]
+
+    def set_default_logger_severity(self, level):
+        return None
+
+    def InferenceSession(self, *args, **kwargs):
+        session = Mock()
+        session.get_providers.return_value = ["CPUExecutionProvider"]
+        return session
+
+
+@pytest.fixture(autouse=True)
+def fake_onnxruntime():
+    with patch("fastkokoro.onnx.ort", FakeRuntime()):
+        yield
 
 
 def _settings(**overrides):
@@ -61,6 +102,22 @@ def _settings(**overrides):
     )
     values.update(overrides)
     return Settings(**values)
+
+
+def test_create_session_raises_actionable_error_without_onnxruntime():
+    real_import = builtins.__import__
+
+    def missing_onnxruntime(name, *args, **kwargs):
+        if name == "onnxruntime":
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    with (
+        patch("builtins.__import__", side_effect=missing_onnxruntime),
+        patch("fastkokoro.onnx.ort", None),
+        pytest.raises(RuntimeError, match=r"fastkokoro\[cpu\].*fastkokoro\[gpu\]"),
+    ):
+        create_session(Path("model.onnx"), _settings())
 
 
 def test_create_session_uses_configured_providers():
@@ -204,17 +261,6 @@ def test_create_session_applies_log_severity_level():
 
 
 def test_create_session_registers_adain_custom_op_library():
-    class FakeSessionOptions:
-        def __init__(self):
-            self._registered_custom_ops_library = []
-            self.graph_optimization_level = None
-            self.log_severity_level = None
-            self.intra_op_num_threads = 0
-            self.inter_op_num_threads = 0
-
-        def register_custom_ops_library(self, path):
-            self._registered_custom_ops_library.append(path)
-
     custom_op_library = Path("/tmp/libfastkokoro_adain.so")
     with (
         patch(
@@ -255,17 +301,6 @@ def test_create_session_rejects_adain_fusion_with_non_cpu_provider():
 
 
 def test_create_session_registers_conv_adain_custom_op_library():
-    class FakeSessionOptions:
-        def __init__(self):
-            self._registered_custom_ops_library = []
-            self.graph_optimization_level = None
-            self.log_severity_level = None
-            self.intra_op_num_threads = 0
-            self.inter_op_num_threads = 0
-
-        def register_custom_ops_library(self, path):
-            self._registered_custom_ops_library.append(path)
-
     custom_op_library = Path("/tmp/libfastkokoro_conv_adain.so")
     with (
         patch(

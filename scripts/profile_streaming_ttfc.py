@@ -6,10 +6,9 @@ import statistics
 import time
 from dataclasses import asdict, dataclass
 
-from kokoro_onnx import SAMPLE_RATE, trim_audio
-
 from fastkokoro.audio import encode_audio
 from fastkokoro.engine import FastKokoro, split_phonemes_for_model
+from fastkokoro.kokoro import SAMPLE_RATE, trim_audio
 from fastkokoro.streaming import (
     split_pcm_frames,
     split_phrases,
