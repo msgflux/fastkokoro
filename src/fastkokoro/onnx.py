@@ -22,8 +22,13 @@ def _missing_runtime_error() -> RuntimeError:
 
 
 def _require_ort():
+    global ort
     if ort is None:
-        raise _missing_runtime_error()
+        try:
+            import onnxruntime as runtime
+        except ModuleNotFoundError as exc:
+            raise _missing_runtime_error() from exc
+        ort = runtime
     return ort
 
 

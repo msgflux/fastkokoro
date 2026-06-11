@@ -32,6 +32,22 @@ from fastkokoro.streaming import (
 from fastkokoro.voices import normalize_language, validate_voice_language
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _require_ort():
+    global ort
+    if ort is None:
+        try:
+            import onnxruntime as runtime
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "ONNX Runtime is not installed. Install `fastkokoro[gpu]` "
+                "to use CUDA IOBinding."
+            ) from exc
+        ort = runtime
+    return ort
+
+
 OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
 PAUSE_TAG_PATTERN = re.compile(r"\[pause:(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
@@ -361,14 +377,10 @@ class FastKokoro:
     def _run_onnx_audio_cuda_iobinding(
         self, inputs: dict[str, np.ndarray]
     ) -> np.ndarray:
+        runtime = _require_ort()
         binding = self.session.io_binding()
         for name, value in inputs.items():
-            if ort is None:
-                raise RuntimeError(
-                    "ONNX Runtime is not installed. Install `fastkokoro[gpu]` "
-                    "to use CUDA IOBinding."
-                )
-            ortvalue = ort.OrtValue.ortvalue_from_numpy(value, "cuda", 0)
+            ortvalue = runtime.OrtValue.ortvalue_from_numpy(value, "cuda", 0)
             binding.bind_ortvalue_input(name, ortvalue)
         binding.bind_output(self._onnx_output_name, device_type="cpu")
         self.session.run_with_iobinding(binding)

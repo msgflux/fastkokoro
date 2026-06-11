@@ -5,8 +5,24 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import fastkokoro.engine as engine_module
 from fastkokoro.config import Settings
 from fastkokoro.engine import FastKokoro, split_phonemes_for_model
+
+
+class FakeOrtValue:
+    @staticmethod
+    def ortvalue_from_numpy(value, device_type, device_id):
+        return value, device_type, device_id
+
+
+@pytest.fixture(autouse=True)
+def fake_engine_onnxruntime(monkeypatch):
+    monkeypatch.setattr(
+        engine_module,
+        "ort",
+        SimpleNamespace(OrtValue=FakeOrtValue),
+    )
 
 
 def _settings(**overrides):
