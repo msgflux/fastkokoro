@@ -18,11 +18,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3.12 python3.12-venv \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml README.md ./
 COPY src ./src
 
-RUN uv sync --frozen --no-dev \
-    && uv pip install "numpy<2" "onnxruntime-gpu==${FASTKOKORO_LEGACY_ORT_GPU_VERSION}"
+RUN uv venv .venv \
+    && uv pip install --python .venv "." \
+    && uv pip install --python .venv "numpy<2" "onnxruntime-gpu==${FASTKOKORO_LEGACY_ORT_GPU_VERSION}"
 
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS runtime
 

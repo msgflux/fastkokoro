@@ -84,13 +84,15 @@ jobs:
           PY
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: |
+          uv lock
+          uv sync --locked --group dev
 
       - name: Build package
         run: uv build
 
       - name: Check package
-        run: uv run twine check dist/*
+        run: uv run --locked twine check dist/*
 
       - name: Create and push tag
         run: |
