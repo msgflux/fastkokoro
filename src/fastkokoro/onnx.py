@@ -31,6 +31,7 @@ def _check_gpu_shadowed() -> None:
     runtime = _require_ort()
     try:
         import importlib.metadata
+
         importlib.metadata.distribution("onnxruntime-gpu")
     except (importlib.metadata.PackageNotFoundError, ImportError):
         return
@@ -43,6 +44,7 @@ def _check_gpu_shadowed() -> None:
         "onnxruntime-gpu installed but GPU providers not detected. "
         "Run: pip install --upgrade --force-reinstall --no-deps onnxruntime-gpu"
     )
+
 
 GRAPH_OPTIMIZATION_LEVELS = {
     "disable": "ORT_DISABLE_ALL",
