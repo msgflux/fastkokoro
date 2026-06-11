@@ -18,19 +18,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Validate release commit
         run: |
           echo "Validating release commit files"
           echo ""
 
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          BASE_REF="HEAD^1"
+          if ! git rev-parse "$BASE_REF" >/dev/null 2>&1; then
+            BASE_REF="HEAD~1"
+          fi
 
-          if ! echo "$COMMIT_MESSAGE" | grep -q "RELEASE:"; then
-            echo "Not a release commit (missing RELEASE: marker)"
-            exit 0
+          COMMIT_MESSAGES=$(git log --format=%B "$BASE_REF"..HEAD)
+          CHANGED_FILES=$(git diff --name-only "$BASE_REF" HEAD)
+
+          if ! echo "$COMMIT_MESSAGES" | grep -q "RELEASE:"; then
+            echo "pyproject.toml changed without a RELEASE: commit marker"
+            echo ""
+            echo "Commit messages in this push:"
+            echo "$COMMIT_MESSAGES"
+            exit 1
           fi
 
           echo "Files changed in this commit:"
@@ -62,5 +70,6 @@ jobs:
 
             echo "Release validation passed"
           else
-            echo "Not a release commit (pyproject.toml not modified)"
+            echo "Release marker found, but pyproject.toml was not modified"
+            exit 1
           fi

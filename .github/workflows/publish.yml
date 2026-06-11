@@ -6,6 +6,12 @@ on:
     types:
       - completed
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to publish"
+        required: false
+        default: "main"
 
 permissions:
   contents: write
@@ -15,15 +21,15 @@ jobs:
   build-and-tag:
     name: Build and Tag
     if: |
-      github.event.workflow_run.conclusion == 'success' &&
-      contains(github.event.workflow_run.head_commit.message, 'RELEASE:')
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.inputs.ref || 'main' }}
           fetch-depth: 2
 
       - name: Set up Python
@@ -71,17 +77,27 @@ jobs:
         run: |
           python <<'PY'
           from packaging.version import parse as parse_version
+          import os
           import sys
 
           current = "${{ steps.current.outputs.version }}"
           previous = "${{ steps.previous.outputs.version }}"
+          event_name = os.environ["GITHUB_EVENT_NAME"]
 
           print(f"Comparing: {previous} -> {current}")
 
-          if parse_version(current) <= parse_version(previous):
+          if event_name != "workflow_dispatch" and parse_version(current) <= parse_version(previous):
               print("Version must increase for a release")
               sys.exit(1)
           PY
+
+      - name: Validate tag is new
+        run: |
+          VERSION="v${{ steps.current.outputs.version }}"
+          if git ls-remote --tags origin "$VERSION" | grep -q "$VERSION"; then
+            echo "Tag already exists: $VERSION"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
@@ -137,7 +153,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.inputs.ref || 'main' }}
 
       - name: Get version
         id: version
