@@ -1,3 +1,4 @@
+import builtins
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -104,7 +105,15 @@ def _settings(**overrides):
 
 
 def test_create_session_raises_actionable_error_without_onnxruntime():
+    real_import = builtins.__import__
+
+    def missing_onnxruntime(name, *args, **kwargs):
+        if name == "onnxruntime":
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
     with (
+        patch("builtins.__import__", side_effect=missing_onnxruntime),
         patch("fastkokoro.onnx.ort", None),
         pytest.raises(RuntimeError, match=r"fastkokoro\[cpu\].*fastkokoro\[gpu\]"),
     ):
