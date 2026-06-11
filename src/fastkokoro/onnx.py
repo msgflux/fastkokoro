@@ -3,20 +3,41 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import onnxruntime as ort
+try:
+    import onnxruntime as ort
+except ModuleNotFoundError:
+    ort = None
 
 from fastkokoro.config import Settings
 
 logger = logging.getLogger("uvicorn.error")
 
 
+def _missing_runtime_error() -> RuntimeError:
+    return RuntimeError(
+        "ONNX Runtime is not installed. Install fastkokoro with one runtime "
+        "extra: `pip install fastkokoro[cpu]` for CPU or "
+        "`pip install fastkokoro[gpu]` for GPU."
+    )
+
+
+def _require_ort():
+    if ort is None:
+        raise _missing_runtime_error()
+    return ort
+
+
 def _check_gpu_shadowed() -> None:
+    runtime = _require_ort()
     try:
         import importlib.metadata
         importlib.metadata.distribution("onnxruntime-gpu")
     except (importlib.metadata.PackageNotFoundError, ImportError):
         return
-    if any(p.startswith(("CUDA", "TensorRT", "ROCM")) for p in ort.get_available_providers()):
+    if any(
+        p.startswith(("CUDA", "TensorRT", "ROCM"))
+        for p in runtime.get_available_providers()
+    ):
         return
     logger.warning(
         "onnxruntime-gpu installed but GPU providers not detected. "
@@ -24,16 +45,17 @@ def _check_gpu_shadowed() -> None:
     )
 
 GRAPH_OPTIMIZATION_LEVELS = {
-    "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
-    "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
-    "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
-    "all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+    "disable": "ORT_DISABLE_ALL",
+    "basic": "ORT_ENABLE_BASIC",
+    "extended": "ORT_ENABLE_EXTENDED",
+    "all": "ORT_ENABLE_ALL",
 }
 
 
-def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession:
+def create_session(model_path: Path, settings: Settings):
+    runtime = _require_ort()
     _check_gpu_shadowed()
-    available = ort.get_available_providers()
+    available = runtime.get_available_providers()
     providers = (
         available if settings.onnx_auto_providers else list(settings.onnx_providers)
     )
@@ -56,11 +78,13 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
         settings.onnx_provider_options.get(provider, {}) for provider in providers
     ]
 
-    ort.set_default_logger_severity(settings.onnx_log_severity_level)
-    session_options = ort.SessionOptions()
-    session_options.graph_optimization_level = GRAPH_OPTIMIZATION_LEVELS[
-        settings.onnx_graph_optimization_level
-    ]
+    runtime.set_default_logger_severity(settings.onnx_log_severity_level)
+    session_options = runtime.SessionOptions()
+    graph_level = GRAPH_OPTIMIZATION_LEVELS[settings.onnx_graph_optimization_level]
+    session_options.graph_optimization_level = getattr(
+        runtime.GraphOptimizationLevel,
+        graph_level,
+    )
     session_options.log_severity_level = settings.onnx_log_severity_level
     if settings.onnx_intra_op_num_threads is not None:
         session_options.intra_op_num_threads = settings.onnx_intra_op_num_threads
@@ -77,7 +101,7 @@ def create_session(model_path: Path, settings: Settings) -> ort.InferenceSession
             str(settings.onnx_conv_adain_custom_op_library)
         )
 
-    session = ort.InferenceSession(
+    session = runtime.InferenceSession(
         str(model_path),
         providers=providers,
         provider_options=provider_options,

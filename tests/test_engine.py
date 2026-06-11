@@ -152,7 +152,7 @@ async def test_sentence_stream_splits_text_and_pcm_frames():
 
 
 @pytest.mark.asyncio
-async def test_kokoro_stream_strategy_uses_upstream_stream():
+async def test_kokoro_stream_strategy_uses_local_engine_path():
     engine = _engine(_settings(stream_strategy="kokoro"))
 
     chunks = [
@@ -165,7 +165,7 @@ async def test_kokoro_stream_strategy_uses_upstream_stream():
         )
     ]
 
-    assert engine.kokoro.created_texts == []
+    assert engine.kokoro.created_texts == ["Hello. World."]
     assert len(chunks) == 1
 
 

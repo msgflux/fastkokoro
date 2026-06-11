@@ -18,7 +18,7 @@ def test_convert_raw_voices_to_npz(tmp_path):
 
     converted = convert_raw_voices_to_npz(voices_bin, voices_index, cache_dir)
 
-    assert converted == cache_dir / "voices-kokoro-onnx.npz"
+    assert converted == cache_dir / "voices-fastkokoro.npz"
     loaded = np.load(converted)
     assert loaded.files == names
     assert loaded["af_heart"].shape == VOICE_STYLE_SHAPE

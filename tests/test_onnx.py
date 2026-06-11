@@ -63,6 +63,14 @@ def _settings(**overrides):
     return Settings(**values)
 
 
+def test_create_session_raises_actionable_error_without_onnxruntime():
+    with (
+        patch("fastkokoro.onnx.ort", None),
+        pytest.raises(RuntimeError, match=r"fastkokoro\[cpu\].*fastkokoro\[gpu\]"),
+    ):
+        create_session(Path("model.onnx"), _settings())
+
+
 def test_create_session_uses_configured_providers():
     session = Mock()
     session.get_providers.return_value = ["CPUExecutionProvider"]

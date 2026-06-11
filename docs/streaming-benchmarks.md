@@ -18,7 +18,7 @@ uv run python scripts/benchmark_streaming.py
 
 The benchmark reports one JSON line per strategy:
 
-- `kokoro_create_stream`: current `kokoro-onnx` streaming implementation.
+- `kokoro_create_stream`: legacy benchmark label for the Kokoro-style streaming path.
 - `sentence_segments`: splits text into sentences and synthesizes one sentence at
   a time.
 - `sentence_segments_200ms_frames`: splits text into sentences, then slices the
@@ -63,10 +63,9 @@ was added:
 | `sentence_segments` | 3 | 1.57s | 10.77s |
 | `sentence_segments_200ms_frames` | 47 | 1.84s | 11.56s |
 
-The current `kokoro-onnx` stream emits one chunk for these short and medium
-inputs, so time to first chunk is effectively total latency. Sentence-level
-segmentation improves perceived streaming latency by yielding earlier, while
-frame slicing improves playback granularity after the first sentence is ready.
+Sentence-level segmentation improves perceived streaming latency by yielding
+earlier, while frame slicing improves playback granularity after the first
+sentence is ready.
 
 On the local 8-CPU machine used for these measurements, setting
 `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS=4` and

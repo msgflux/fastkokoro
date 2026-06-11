@@ -9,7 +9,7 @@ other providers when the matching runtime package is installed. The default
 model is NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
 
 The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
-once into the `.npz` voice format expected by `kokoro-onnx`, so the default model
+once into the internal `.npz` voice format used by `fastkokoro`, so the default model
 and voices both come from `nvidia/kokoro-82M-onnx-opt`.
 
 ## Demo
@@ -20,29 +20,25 @@ https://github.com/user-attachments/assets/9bb0e108-cd89-4e40-a9a7-57f4c5964d52
 
 ## Install
 
-With uv:
+Install one ONNX Runtime extra for inference. CPU:
 
 ```bash
-uv add fastkokoro
+uv add 'fastkokoro[cpu]'
+# or
+pip install 'fastkokoro[cpu]'
 ```
 
-With pip:
-
-```bash
-pip install fastkokoro
-```
-
-For GPU builds on platforms supported by `onnxruntime-gpu`:
+GPU, on platforms supported by `onnxruntime-gpu`:
 
 ```bash
 uv add 'fastkokoro[gpu]'
+# or
+pip install 'fastkokoro[gpu]'
 ```
 
-PCM JIT acceleration with Numba is included by default:
-
-```bash
-uv add fastkokoro
-```
+The base `fastkokoro` package intentionally does not install ONNX Runtime.
+Starting the engine without either extra raises an explicit install error.
+PCM JIT acceleration with Numba is included by default.
 
 ## Run
 
@@ -54,12 +50,12 @@ The server starts on `http://0.0.0.0:8880` by default.
 
 ## From Source
 
-Clone the repository and install the local development environment:
+Clone the repository and install the local CPU development environment:
 
 ```bash
 git clone https://github.com/msgflux/fastkokoro.git
 cd fastkokoro
-uv sync
+uv sync --extra cpu
 ```
 
 Run the server from source:
@@ -80,7 +76,7 @@ Or provide custom buckets:
 uv run fastkokoro --warmup-multi-shape-buckets 6,8,9,10,11,12,16,24
 ```
 
-For GPU development environments:
+For GPU development environments, use the GPU extra instead:
 
 ```bash
 uv sync --extra gpu
@@ -153,7 +149,7 @@ Environment variables:
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `hello` |
-| `FASTKOKORO_STREAM_STRATEGY` | `chunk` |
+| `FASTKOKORO_STREAM_STRATEGY` | `adaptive` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `32` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | `2` |
@@ -205,8 +201,8 @@ clients. `phrase` splits only on phrase punctuation such as commas, semicolons,
 and question marks. `sentence` synthesizes one sentence at a time. For
 `response_format=pcm`, the server also slices each generated segment into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
-`FASTKOKORO_STREAM_STRATEGY=kokoro` to use the upstream `kokoro-onnx` streaming
-path directly.
+`FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
+uses the local fastkokoro synthesis path instead of the upstream engine.
 
 Inline pause tokens can be embedded in input text. `[pause:1.5s]` inserts 1.5
 seconds of silence without running the model for that segment. The form is
