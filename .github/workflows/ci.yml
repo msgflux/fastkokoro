@@ -22,19 +22,21 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
-        run: uv sync --group dev --extra cpu
+        run: |
+          uv lock
+          uv sync --locked --group dev --extra cpu
 
       - name: Format check
-        run: uv run ruff format --check .
+        run: uv run --locked ruff format --check .
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
 
       - name: Test
-        run: uv run pytest
+        run: uv run --locked pytest
 
       - name: Build package
         run: uv build
 
       - name: Check package
-        run: uv run twine check dist/*
+        run: uv run --locked twine check dist/*
