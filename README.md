@@ -156,7 +156,8 @@ Environment variables:
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
-| `FASTKOKORO_WARMUP_TEXT` | `hello` |
+| `FASTKOKORO_WARMUP_TEXT` | `Hello there. This is a warmup request for streaming speech generation.` |
+| `FASTKOKORO_WARMUP_REQUEST` | `false` |
 | `FASTKOKORO_STREAM_STRATEGY` | `adaptive` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `32` |
@@ -177,6 +178,10 @@ Environment variables:
 | `FASTKOKORO_WARMUP_MULTI_SHAPE` | `false` |
 | `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` | `6,8,9,10,11,12,16,24` |
 | `FASTKOKORO_JIT` | `true` |
+| `FASTKOKORO_PROFILE` | `false` |
+| `FASTKOKORO_PROFILE_DIR` | `FASTKOKORO_CACHE_DIR/profiles` |
+| `FASTKOKORO_PROFILE_WARMUP` | `false` unless `FASTKOKORO_PROFILE=true` |
+| `FASTKOKORO_PROFILE_REQUESTS` | `false` unless `FASTKOKORO_PROFILE=true` |
 | `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
@@ -192,6 +197,13 @@ Environment variables:
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
+Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
+the same streaming speech endpoint flow and consume the first chunk. When
+`FASTKOKORO_WARMUP_MULTI_SHAPE=true`, the startup request warmup also runs a
+small multi-shape battery of richer phrases instead of only a trivial short
+utterance. This is useful when the remaining TTFC cost lives in the first real
+request path rather than in engine-only warmup.
+
 Set `FASTKOKORO_WARMUP_MULTI_SHAPE=true` to enable experimental multi-shape ONNX
 warmup focused on first chunk latency. The server runs one pass per bucket from
 `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` without changing request shapes at
@@ -200,6 +212,12 @@ runtime.
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
 serving requests. Set `FASTKOKORO_JIT=false` to force the NumPy path.
+
+Enable built-in profiling with `FASTKOKORO_PROFILE=true` to write `cProfile` artifacts for
+startup warmup and speech requests under `FASTKOKORO_PROFILE_DIR`. Each run produces a
+raw `.prof` file plus a `.txt` summary sorted by cumulative time. Use
+`FASTKOKORO_PROFILE_WARMUP` and `FASTKOKORO_PROFILE_REQUESTS` to narrow profiling to
+startup or request handling when debugging TTFC regressions.
 
 `FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
 possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and

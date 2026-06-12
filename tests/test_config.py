@@ -1,5 +1,6 @@
 from fastkokoro.config import (
     DEFAULT_JIT,
+    DEFAULT_PROFILE,
     DEFAULT_ONNX_ADAIN_FUSION,
     DEFAULT_ONNX_CONV_ADAIN_FUSION,
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
@@ -8,6 +9,7 @@ from fastkokoro.config import (
     DEFAULT_ONNX_IO_BINDING_DEVICE,
     DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
     DEFAULT_WARMUP_MULTI_SHAPE,
+    DEFAULT_WARMUP_TEXT,
     Settings,
 )
 
@@ -52,6 +54,11 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE", "true")
     monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,6,8,16")
     monkeypatch.setenv("FASTKOKORO_JIT", "false")
+    monkeypatch.setenv("FASTKOKORO_WARMUP_REQUEST", "true")
+    monkeypatch.setenv("FASTKOKORO_PROFILE", "true")
+    monkeypatch.setenv("FASTKOKORO_PROFILE_DIR", "/tmp/profiles")
+    monkeypatch.setenv("FASTKOKORO_PROFILE_WARMUP", "false")
+    monkeypatch.setenv("FASTKOKORO_PROFILE_REQUESTS", "true")
 
     settings = Settings.from_env()
 
@@ -90,6 +97,11 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.warmup_multi_shape is True
     assert settings.onnx_ttfc_shape_buckets == (6, 8, 16)
     assert settings.jit is False
+    assert settings.warmup_request is True
+    assert settings.profile is True
+    assert str(settings.profile_dir) == "/tmp/profiles"
+    assert settings.profile_warmup is False
+    assert settings.profile_requests is True
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -128,8 +140,14 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_conv_adain_model_path is None
     assert settings.onnx_conv_adain_custom_op_library is None
     assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
+    assert settings.warmup_text == DEFAULT_WARMUP_TEXT
     assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
     assert settings.jit == DEFAULT_JIT
+    assert settings.warmup_request is False
+    assert settings.profile is DEFAULT_PROFILE
+    assert settings.profile_warmup is DEFAULT_PROFILE
+    assert settings.profile_requests is DEFAULT_PROFILE
+    assert settings.profile_dir == settings.cache_dir / "profiles"
     assert settings.stream_strategy == "adaptive"
     assert settings.stream_adaptive_max_chars == 50
     assert settings.stream_adaptive_cpu_max_chars == 12
@@ -254,3 +272,14 @@ def test_settings_parses_cors(monkeypatch):
     assert settings.cors_allow_methods == ("GET", "POST")
     assert settings.cors_allow_headers == ("Authorization", "Content-Type")
     assert settings.cors_allow_credentials is True
+
+
+def test_settings_profile_subflags_default_to_master_switch(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_WARMUP_REQUEST", "true")
+    monkeypatch.setenv("FASTKOKORO_PROFILE", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.profile is True
+    assert settings.profile_warmup is True
+    assert settings.profile_requests is True

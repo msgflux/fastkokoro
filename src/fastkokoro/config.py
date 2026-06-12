@@ -29,7 +29,9 @@ DEFAULT_ONNX_CONV_ADAIN_FUSION = False
 DEFAULT_WARMUP_MULTI_SHAPE = False
 DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
 DEFAULT_JIT = True
-DEFAULT_WARMUP_TEXT = "hello"
+DEFAULT_PROFILE = False
+DEFAULT_WARMUP_REQUEST = False
+DEFAULT_WARMUP_TEXT = "Hello there. This is a warmup request for streaming speech generation."
 DEFAULT_STREAM_STRATEGY = "adaptive"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
@@ -87,6 +89,11 @@ class Settings:
     jit: bool
     warmup: bool
     warmup_text: str
+    warmup_request: bool
+    profile: bool
+    profile_dir: Path
+    profile_warmup: bool
+    profile_requests: bool
     stream_strategy: str
     stream_audio_frame_ms: int
     stream_max_segment_chars: int
@@ -118,6 +125,11 @@ class Settings:
         cors_allow_origins = os.getenv("FASTKOKORO_CORS_ALLOW_ORIGINS")
         cors_allow_methods = os.getenv("FASTKOKORO_CORS_ALLOW_METHODS")
         cors_allow_headers = os.getenv("FASTKOKORO_CORS_ALLOW_HEADERS")
+        profile_dir = os.getenv("FASTKOKORO_PROFILE_DIR")
+        profile_enabled = parse_bool(
+            os.getenv("FASTKOKORO_PROFILE"),
+            default=DEFAULT_PROFILE,
+        )
 
         return cls(
             model_repo=os.getenv("FASTKOKORO_MODEL_REPO", DEFAULT_MODEL_REPO),
@@ -235,6 +247,24 @@ class Settings:
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
+            warmup_request=parse_bool(
+                os.getenv("FASTKOKORO_WARMUP_REQUEST"),
+                default=DEFAULT_WARMUP_REQUEST,
+            ),
+            profile=profile_enabled,
+            profile_dir=(
+                Path(profile_dir).expanduser()
+                if profile_dir
+                else Path(cache_dir or "~/.cache/fastkokoro").expanduser() / "profiles"
+            ),
+            profile_warmup=parse_bool(
+                os.getenv("FASTKOKORO_PROFILE_WARMUP"),
+                default=profile_enabled,
+            ),
+            profile_requests=parse_bool(
+                os.getenv("FASTKOKORO_PROFILE_REQUESTS"),
+                default=profile_enabled,
+            ),
             stream_strategy=parse_stream_strategy(
                 os.getenv("FASTKOKORO_STREAM_STRATEGY", DEFAULT_STREAM_STRATEGY)
             ),

@@ -5,7 +5,7 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 from fastkokoro.config import Settings
-from fastkokoro.server import create_app
+from fastkokoro.server import create_app, iter_warmup_request_texts
 
 
 class FakeEngine:
@@ -13,6 +13,8 @@ class FakeEngine:
         self.settings = settings()
         self.session = Mock()
         self.session.get_providers.return_value = ["CPUExecutionProvider"]
+        self.warmup_calls = 0
+        self.stream_calls = []
 
     def voices(self) -> list[str]:
         return ["af_heart", "pf_dora"]
@@ -27,7 +29,11 @@ class FakeEngine:
     def create(self, text: str, **kwargs) -> bytes:
         return b"audio"
 
+    def warmup(self) -> None:
+        self.warmup_calls += 1
+
     async def create_stream(self, text: str, **kwargs) -> AsyncGenerator[bytes, None]:
+        self.stream_calls.append((text, kwargs))
         yield b"chunk-1"
         yield b"chunk-2"
 
@@ -68,7 +74,12 @@ def settings(**overrides):
         onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
         jit=False,
         warmup=False,
-        warmup_text="hello",
+        warmup_text="Hello there. This is a warmup request for streaming speech generation.",
+        warmup_request=False,
+        profile=False,
+        profile_dir=Path("/tmp/cache/profiles"),
+        profile_warmup=False,
+        profile_requests=False,
         stream_strategy="sentence",
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
@@ -285,3 +296,108 @@ def test_speech_streaming():
     assert metrics["speech"]["bytes"] == len(content)
     assert metrics["speech"]["first_chunk_observations"] == 1
     assert metrics["speech"]["first_chunk_latency_seconds_last"] >= 0
+
+
+def test_speech_profiling_writes_request_artifacts(tmp_path):
+    client = TestClient(
+        create_app(
+            FakeEngine(),
+            settings(
+                profile=True,
+                profile_dir=tmp_path,
+                profile_requests=True,
+            ),
+        )
+    )
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "kokoro",
+            "input": "hello",
+            "voice": "af_heart",
+            "response_format": "pcm",
+        },
+    )
+
+    assert response.status_code == 200
+    profiles = sorted(tmp_path.glob('*speech-non-streaming*.prof'))
+    summaries = sorted(tmp_path.glob('*speech-non-streaming*.txt'))
+    assert len(profiles) == 1
+    assert len(summaries) == 1
+    assert 'cumtime' in summaries[0].read_text()
+
+
+def test_warmup_profiling_writes_startup_artifacts(tmp_path):
+    engine = FakeEngine()
+    engine.settings = settings(
+        warmup=True,
+        profile=True,
+        profile_dir=tmp_path,
+        profile_warmup=True,
+    )
+
+    with TestClient(create_app(engine, engine.settings)):
+        pass
+
+    assert engine.warmup_calls == 1
+    profiles = sorted(tmp_path.glob('*startup-warmup*.prof'))
+    summaries = sorted(tmp_path.glob('*startup-warmup*.txt'))
+    assert len(profiles) == 1
+    assert len(summaries) == 1
+
+
+def test_startup_warmup_request_consumes_first_stream_chunk():
+    engine = FakeEngine()
+    engine.settings = settings(warmup_request=True)
+
+    with TestClient(create_app(engine, engine.settings)):
+        pass
+
+    assert len(engine.stream_calls) == 1
+    text, kwargs = engine.stream_calls[0]
+    assert text == "Hello there. This is a warmup request for streaming speech generation."
+    assert kwargs["voice"] == "af_heart"
+    assert kwargs["response_format"] == "pcm"
+    assert kwargs["lang"] == "en-us"
+
+
+def test_startup_warmup_request_does_not_record_speech_metrics():
+    engine = FakeEngine()
+    engine.settings = settings(warmup_request=True)
+
+    with TestClient(create_app(engine, engine.settings)) as client:
+        metrics = client.get("/metrics").json()
+
+    assert metrics["speech"]["requests"] == 0
+
+
+def test_iter_warmup_request_texts_uses_multi_shape_and_deduplicates():
+    texts = list(
+        iter_warmup_request_texts(
+            settings(
+                warmup_multi_shape=True,
+                onnx_ttfc_shape_buckets=(6, 8, 16),
+                warmup_text="Custom warmup sentence.",
+            )
+        )
+    )
+
+    assert texts[0] == "Custom warmup sentence."
+    assert len(texts) == 4
+    assert len(set(texts)) == len(texts)
+    assert all(len(text.split()) >= 3 for text in texts[1:])
+
+
+def test_startup_warmup_request_uses_multi_shape_texts():
+    engine = FakeEngine()
+    engine.settings = settings(
+        warmup_request=True,
+        warmup_multi_shape=True,
+        onnx_ttfc_shape_buckets=(6, 8),
+    )
+
+    with TestClient(create_app(engine, engine.settings)):
+        pass
+
+    assert len(engine.stream_calls) == 3
