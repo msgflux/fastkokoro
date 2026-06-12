@@ -26,10 +26,13 @@ dependencies = [
 
 [project.optional-dependencies]
 cpu = [
-    "onnxruntime>=1.22.0",
+    "onnxruntime>=1.18.1",
 ]
 gpu = [
-    "onnxruntime-gpu>=1.20.0; platform_machine == 'x86_64' and sys_platform != 'darwin'",
+    "onnxruntime-gpu>=1.18.1; platform_machine == 'x86_64' and sys_platform != 'darwin'",
+]
+gpu-legacy = [
+    "onnxruntime-gpu==1.18.1; platform_machine == 'x86_64' and sys_platform != 'darwin'",
 ]
 
 [project.scripts]
