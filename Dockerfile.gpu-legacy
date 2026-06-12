@@ -7,7 +7,6 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV DEBIAN_FRONTEND=noninteractive
-ENV FASTKOKORO_LEGACY_ORT_GPU_VERSION=1.18.1
 
 WORKDIR /app
 
@@ -22,8 +21,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN uv venv .venv \
-    && uv pip install --python .venv "." \
-    && uv pip install --python .venv "numpy<2" "onnxruntime-gpu==${FASTKOKORO_LEGACY_ORT_GPU_VERSION}"
+    && uv pip install --python .venv ".[gpu]"
 
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS runtime
 
