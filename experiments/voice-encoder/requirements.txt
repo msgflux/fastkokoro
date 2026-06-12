@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+-e .
+datasets>=3.0.0
+librosa>=0.10.0
+onnxruntime-gpu==1.18.1
+soundfile>=0.13.0
+torch==2.5.1+cu118
+torchaudio==2.5.1+cu118
+tqdm>=4.66.0

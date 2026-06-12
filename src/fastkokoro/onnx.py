@@ -67,15 +67,32 @@ DEFAULT_CUDA_PROVIDER_OPTIONS: dict[str, str] = {
     "enable_cuda_graph": "true",
 }
 
+# Fallback tiers for older onnxruntime-gpu versions that don't support all options.
+_CUDA_OPTIONS_TIERS: list[dict[str, str] | None] = [
+    DEFAULT_CUDA_PROVIDER_OPTIONS,
+    {
+        "cudnn_conv_algo_search": "HEURISTIC",
+        "do_copy_in_default_stream": "false",
+        "arena_extend_strategy": "kSameAsRequested",
+        "cudnn_conv_use_max_workspace": "1",
+    },
+    {
+        "do_copy_in_default_stream": "false",
+        "arena_extend_strategy": "kSameAsRequested",
+    },
+    None,
+]
+
 
 def _merge_provider_options(
     providers: list[str],
     user_options: dict[str, dict[str, str]],
+    cuda_defaults: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     merged = []
     for provider in providers:
-        if "CUDA" in provider:
-            options = dict(DEFAULT_CUDA_PROVIDER_OPTIONS)
+        if "CUDA" in provider and cuda_defaults is not None:
+            options = dict(cuda_defaults)
             options.update(user_options.get(provider, {}))
         else:
             options = dict(user_options.get(provider, {}))
@@ -105,9 +122,6 @@ def create_session(model_path: Path, settings: Settings):
             "Requested ONNX Runtime provider(s) are not available: "
             f"{', '.join(missing)}. Available providers: {', '.join(available)}"
         )
-    provider_options = _merge_provider_options(
-        providers, settings.onnx_provider_options
-    )
 
     runtime.set_default_logger_severity(settings.onnx_log_severity_level)
     session_options = runtime.SessionOptions()
@@ -132,12 +146,30 @@ def create_session(model_path: Path, settings: Settings):
             str(settings.onnx_conv_adain_custom_op_library)
         )
 
-    session = runtime.InferenceSession(
-        str(model_path),
-        providers=providers,
-        provider_options=provider_options,
-        sess_options=session_options,
-    )
+    session = None
+    last_error = None
+    for cuda_defaults in _CUDA_OPTIONS_TIERS:
+        provider_options = _merge_provider_options(
+            providers, settings.onnx_provider_options, cuda_defaults
+        )
+        try:
+            session = runtime.InferenceSession(
+                str(model_path),
+                providers=providers,
+                provider_options=provider_options,
+                sess_options=session_options,
+            )
+            break
+        except Exception as e:
+            last_error = e
+            continue
+
+    if session is None:
+        raise RuntimeError(
+            "Failed to create ONNX Runtime session with any CUDA provider option combination. "
+            f"Last error: {last_error}"
+        ) from last_error
+
     logger.info(
         "ONNX Runtime session initialized: model=%s requested_providers=%s "
         "provider_options=%s active_providers=%s available_providers=%s "

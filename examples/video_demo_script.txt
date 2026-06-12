@@ -1,0 +1,6 @@
+FastKokoro streams speech from a Docker GPU server.
+The client starts receiving raw PCM chunks before the full text is synthesized.
+This makes the demo useful for assistants, voice interfaces, and realtime tools.
+
+In this run, the audio is generated through the OpenAI compatible speech endpoint,
+saved to disk while it streams, and converted into a video-ready WAV file.

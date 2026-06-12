@@ -1,0 +1,29 @@
+{
+  "output_dir": "experiments/voice-encoder/data/synthetic",
+  "response_format": "wav",
+  "voices": [
+    "af_heart",
+    "af_bella",
+    "am_adam",
+    "pf_dora",
+    "pm_alex"
+  ],
+  "texts": [
+    {
+      "lang": "en-us",
+      "text": "FastKokoro can synthesize speech with low latency."
+    },
+    {
+      "lang": "en-us",
+      "text": "A voice encoder should recover the Kokoro style vector from audio."
+    },
+    {
+      "lang": "pt-br",
+      "text": "FastKokoro gera fala em portugues brasileiro usando o modelo Kokoro."
+    },
+    {
+      "lang": "pt-br",
+      "text": "O objetivo e criar uma voz customizada sem conversao de voz em tempo real."
+    }
+  ]
+}

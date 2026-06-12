@@ -12,3 +12,6 @@ build/
 *.pcm
 *.opus
 *.flac
+demo-output/
+experiments/voice-encoder/data/
+experiments/voice-encoder/outputs/
