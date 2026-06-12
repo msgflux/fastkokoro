@@ -157,7 +157,16 @@ def test_create_session_auto_uses_all_available_providers():
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
     ]
-    assert init.call_args.kwargs["provider_options"] == [{}, {}]
+    assert init.call_args.kwargs["provider_options"] == [
+        {
+            "cudnn_conv_algo_search": "HEURISTIC",
+            "do_copy_in_default_stream": "false",
+            "arena_extend_strategy": "kSameAsRequested",
+            "cudnn_conv_use_max_workspace": "1",
+            "enable_cuda_graph": "true",
+        },
+        {},
+    ]
 
 
 def test_create_session_applies_provider_options():
@@ -183,10 +192,9 @@ def test_create_session_applies_provider_options():
             ),
         )
 
-    assert init.call_args.kwargs["provider_options"] == [
-        {"device_id": "0"},
-        {},
-    ]
+    options = init.call_args.kwargs["provider_options"]
+    assert options[0]["device_id"] == "0"
+    assert options[0]["cudnn_conv_algo_search"] == "HEURISTIC"
 
 
 def test_create_session_rejects_missing_provider():

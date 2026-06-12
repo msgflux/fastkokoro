@@ -59,6 +59,30 @@ GRAPH_OPTIMIZATION_LEVELS = {
 }
 
 
+DEFAULT_CUDA_PROVIDER_OPTIONS: dict[str, str] = {
+    "cudnn_conv_algo_search": "HEURISTIC",
+    "do_copy_in_default_stream": "false",
+    "arena_extend_strategy": "kSameAsRequested",
+    "cudnn_conv_use_max_workspace": "1",
+    "enable_cuda_graph": "true",
+}
+
+
+def _merge_provider_options(
+    providers: list[str],
+    user_options: dict[str, dict[str, str]],
+) -> list[dict[str, str]]:
+    merged = []
+    for provider in providers:
+        if "CUDA" in provider:
+            options = dict(DEFAULT_CUDA_PROVIDER_OPTIONS)
+            options.update(user_options.get(provider, {}))
+        else:
+            options = dict(user_options.get(provider, {}))
+        merged.append(options)
+    return merged
+
+
 def create_session(model_path: Path, settings: Settings):
     runtime = _require_ort()
     _check_gpu_shadowed()
@@ -81,9 +105,9 @@ def create_session(model_path: Path, settings: Settings):
             "Requested ONNX Runtime provider(s) are not available: "
             f"{', '.join(missing)}. Available providers: {', '.join(available)}"
         )
-    provider_options = [
-        settings.onnx_provider_options.get(provider, {}) for provider in providers
-    ]
+    provider_options = _merge_provider_options(
+        providers, settings.onnx_provider_options
+    )
 
     runtime.set_default_logger_severity(settings.onnx_log_severity_level)
     session_options = runtime.SessionOptions()
