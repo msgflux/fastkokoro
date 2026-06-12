@@ -31,6 +31,9 @@ cpu = [
 gpu = [
     "onnxruntime-gpu>=1.18.1; platform_machine == 'x86_64' and sys_platform != 'darwin'",
 ]
+gpu-legacy = [
+    "onnxruntime-gpu==1.18.1; platform_machine == 'x86_64' and sys_platform != 'darwin'",
+]
 
 [project.scripts]
 fastkokoro = "fastkokoro.cli:main"

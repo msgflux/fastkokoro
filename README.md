@@ -36,6 +36,14 @@ uv add 'fastkokoro[gpu]'
 pip install 'fastkokoro[gpu]'
 ```
 
+Legacy CUDA 11.8 / cuDNN8 GPU environments can use the pinned legacy extra:
+
+```bash
+uv add 'fastkokoro[gpu-legacy]'
+# or
+pip install 'fastkokoro[gpu-legacy]'
+```
+
 The base `fastkokoro` package intentionally does not install ONNX Runtime.
 Starting the engine without either extra raises an explicit install error.
 PCM JIT acceleration with Numba is included by default.

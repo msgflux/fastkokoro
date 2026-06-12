@@ -21,7 +21,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN uv venv .venv \
-    && uv pip install --python .venv ".[gpu]"
+    && uv pip install --python .venv ".[gpu-legacy]"
 
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS runtime
 
