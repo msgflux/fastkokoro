@@ -219,6 +219,16 @@ raw `.prof` file plus a `.txt` summary sorted by cumulative time. Use
 `FASTKOKORO_PROFILE_WARMUP` and `FASTKOKORO_PROFILE_REQUESTS` to narrow profiling to
 startup or request handling when debugging TTFC regressions.
 
+Inspect ONNX fixed-shape readiness with:
+
+```bash
+uv run python scripts/inspect_onnx_fixed_shape.py /path/to/model.onnx
+```
+
+This reports where dynamic shapes remain reachable from `tokens` or `input_ids`,
+including the anti-pattern where a fixed external input is immediately converted
+back into a dynamic tensor inside the graph.
+
 `FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
 possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
 `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default is intentionally small, up to
