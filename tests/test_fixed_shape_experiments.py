@@ -3,6 +3,9 @@ from onnx import TensorProto, helper
 from fastkokoro.fixed_shape_experiments import (
     apply_decoder_entry_annotations,
     apply_decoder_entry_value_annotations,
+    apply_decoder_generator_istft_annotations,
+    apply_decoder_generator_prestft_annotations,
+    apply_decoder_output_annotations,
     apply_encoder_static_batch_annotations,
     apply_fixed_bert_attention_reshapes,
     apply_fixed_bert_embedding_indices,
@@ -454,6 +457,59 @@ def test_apply_decoder_entry_value_annotations_replaces_existing_value_info():
         1,
         256,
     ]
+
+
+def test_apply_decoder_generator_prestft_annotations_adds_fixed_shapes():
+    model = _model()
+
+    apply_decoder_generator_prestft_annotations(model)
+
+    values = {value.name: value for value in model.graph.value_info}
+    assert _shape(values["/decoder/decoder/generator/Reshape_output_0"]) == [
+        1,
+        1,
+        600,
+    ]
+    assert _shape(values["/decoder/decoder/generator/Pad_output_0"]) == [
+        1,
+        1,
+        620,
+    ]
+    assert _shape(values["/decoder/decoder/generator/Reshape_3_output_0"]) == [
+        1,
+        620,
+    ]
+
+
+def test_apply_decoder_generator_istft_annotations_adds_fixed_shapes():
+    model = _model()
+
+    apply_decoder_generator_istft_annotations(model)
+
+    values = {value.name: value for value in model.graph.value_info}
+    assert (
+        _shape(values["/decoder/decoder/generator/istft/stft/Squeeze_1_output_0"])
+        == [1, 1]
+    )
+    assert _shape(values["onnx::Gather_6471"]) == [1]
+    assert (
+        _shape(values["/decoder/decoder/generator/istft/stft/Concat_1_output_0"])
+        == [1, 1, 2]
+    )
+
+
+def test_apply_decoder_output_annotations_adds_fixed_shapes():
+    model = _model()
+
+    apply_decoder_output_annotations(model)
+
+    values = {value.name: value for value in model.graph.value_info}
+    outputs = {value.name: value for value in model.graph.output}
+    assert _shape(
+        values["/decoder/decoder/generator/istft/stft/NonZero_output_0"]
+    ) == [1, 1]
+    assert _shape(values["/decoder/Reshape_output_0"]) == [1, 600]
+    assert _shape(outputs["audio"]) == [600]
 
 
 def test_apply_fixed_text_encoder_lstm_reshapes_reuses_constant_shape():

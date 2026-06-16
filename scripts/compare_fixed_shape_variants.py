@@ -76,6 +76,15 @@ def main() -> int:
                 decoder_entry_value_annotations=(
                     variant.decoder_entry_value_annotations
                 ),
+                decoder_generator_prestft_annotations=(
+                    variant.decoder_generator_prestft_annotations
+                ),
+                decoder_generator_istft_annotations=(
+                    variant.decoder_generator_istft_annotations
+                ),
+                decoder_output_annotations=(
+                    variant.decoder_output_annotations
+                ),
                 text_encoder_lstm_reshapes=variant.text_encoder_lstm_reshapes,
             )
 
@@ -101,6 +110,13 @@ def main() -> int:
             "decoder_entry_value_annotations": (
                 variant.decoder_entry_value_annotations
             ),
+            "decoder_generator_prestft_annotations": (
+                variant.decoder_generator_prestft_annotations
+            ),
+            "decoder_generator_istft_annotations": (
+                variant.decoder_generator_istft_annotations
+            ),
+            "decoder_output_annotations": variant.decoder_output_annotations,
             "text_encoder_lstm_reshapes": variant.text_encoder_lstm_reshapes,
             "dynamic_tensors": len(report.dynamic_tensors),
             "reachable_dynamic_tensors": len(report.reachable_dynamic_tensors),
@@ -145,6 +161,13 @@ def _resolve_variant(
         encoder_core_lstm_states=spec.encoder_core_lstm_states,
         decoder_entry_annotations=spec.decoder_entry_annotations,
         decoder_entry_value_annotations=spec.decoder_entry_value_annotations,
+        decoder_generator_prestft_annotations=(
+            spec.decoder_generator_prestft_annotations
+        ),
+        decoder_generator_istft_annotations=(
+            spec.decoder_generator_istft_annotations
+        ),
+        decoder_output_annotations=spec.decoder_output_annotations,
         text_encoder_lstm_reshapes=spec.text_encoder_lstm_reshapes,
     )
 

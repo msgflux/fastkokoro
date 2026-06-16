@@ -22,6 +22,9 @@ class FixedShapeVariantSpec:
     encoder_core_lstm_states: bool = False
     decoder_entry_annotations: bool = False
     decoder_entry_value_annotations: bool = False
+    decoder_generator_prestft_annotations: bool = False
+    decoder_generator_istft_annotations: bool = False
+    decoder_output_annotations: bool = False
     text_encoder_lstm_reshapes: bool = False
 
 
@@ -109,6 +112,51 @@ EXPERIMENTAL_VARIANTS = (
         decoder_entry_value_annotations=True,
     ),
     FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated-all-entry-values-prestft",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
+        encoder_core_lstm_states=True,
+        decoder_entry_annotations=True,
+        decoder_entry_value_annotations=True,
+        decoder_generator_prestft_annotations=True,
+    ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated-all-entry-values-prestft-istft",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
+        encoder_core_lstm_states=True,
+        decoder_entry_annotations=True,
+        decoder_entry_value_annotations=True,
+        decoder_generator_prestft_annotations=True,
+        decoder_generator_istft_annotations=True,
+    ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated-all-entry-values-prestft-istft-output",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
+        encoder_core_lstm_states=True,
+        decoder_entry_annotations=True,
+        decoder_entry_value_annotations=True,
+        decoder_generator_prestft_annotations=True,
+        decoder_generator_istft_annotations=True,
+        decoder_output_annotations=True,
+    ),
+    FixedShapeVariantSpec(
         name="attn-mask-bert-emb-len-shapes-pred-lstm",
         fixed_input_bucket=64,
         bert_attention_mask=True,
@@ -120,6 +168,9 @@ EXPERIMENTAL_VARIANTS = (
         encoder_core_lstm_states=True,
         decoder_entry_annotations=True,
         decoder_entry_value_annotations=True,
+        decoder_generator_prestft_annotations=True,
+        decoder_generator_istft_annotations=True,
+        decoder_output_annotations=True,
         text_encoder_lstm_reshapes=True,
     ),
     FixedShapeVariantSpec(name="output-pad", fixed_output_length=120000),
@@ -147,6 +198,9 @@ def write_fixed_shape_variant(
     encoder_core_lstm_states: bool = False,
     decoder_entry_annotations: bool = False,
     decoder_entry_value_annotations: bool = False,
+    decoder_generator_prestft_annotations: bool = False,
+    decoder_generator_istft_annotations: bool = False,
+    decoder_output_annotations: bool = False,
     text_encoder_lstm_reshapes: bool = False,
 ) -> Path:
     model = onnx.load(model_path, load_external_data=False)
@@ -174,6 +228,12 @@ def write_fixed_shape_variant(
             apply_decoder_entry_annotations(model)
         if decoder_entry_value_annotations:
             apply_decoder_entry_value_annotations(model)
+        if decoder_generator_prestft_annotations:
+            apply_decoder_generator_prestft_annotations(model)
+        if decoder_generator_istft_annotations:
+            apply_decoder_generator_istft_annotations(model)
+        if decoder_output_annotations:
+            apply_decoder_output_annotations(model)
         if text_encoder_lstm_reshapes:
             apply_fixed_text_encoder_lstm_reshapes(model, fixed_input_bucket)
     elif fixed_input_bucket is not None:
@@ -519,6 +579,88 @@ def apply_decoder_entry_value_annotations(model: onnx.ModelProto) -> None:
         "/encoder/shared/ConstantOfShape_output_0": [2, 1, 256],
     }
     for name, shape in annotations.items():
+        _upsert_value_info(
+            model,
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.FLOAT16,
+                shape,
+            ),
+        )
+
+
+def apply_decoder_generator_prestft_annotations(model: onnx.ModelProto) -> None:
+    annotations = {
+        "/decoder/decoder/generator/Reshape_output_0": [1, 1, 600],
+        "/decoder/decoder/generator/Pad_output_0": [1, 1, 620],
+        "/decoder/decoder/generator/Reshape_3_output_0": [1, 620],
+    }
+    for name, shape in annotations.items():
+        _upsert_value_info(
+            model,
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.FLOAT16,
+                shape,
+            ),
+        )
+
+
+def apply_decoder_generator_istft_annotations(model: onnx.ModelProto) -> None:
+    float_annotations = {
+        "/decoder/decoder/generator/istft/stft/Squeeze_1_output_0": [1, 1],
+        "onnx::Add_6479": [1, 1],
+        "/decoder/decoder/generator/istft/stft/Expand_output_0": [1, 1],
+        "/decoder/decoder/generator/istft/stft/Expand_1_output_0": [1, 1],
+        "/decoder/decoder/generator/istft/stft/Unsqueeze_1_output_0": [1, 1, 1],
+        "/decoder/decoder/generator/istft/stft/Unsqueeze_2_output_0": [1, 1, 1],
+        "/decoder/decoder/generator/istft/stft/Concat_1_output_0": [1, 1, 2],
+    }
+    int_annotations = {
+        "onnx::Gather_6471": [1],
+        "onnx::Reshape_6477": [1],
+    }
+    for name, shape in float_annotations.items():
+        _upsert_value_info(
+            model,
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.FLOAT16,
+                shape,
+            ),
+        )
+    for name, shape in int_annotations.items():
+        _upsert_value_info(
+            model,
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.INT64,
+                shape,
+            ),
+        )
+
+
+def apply_decoder_output_annotations(model: onnx.ModelProto) -> None:
+    int_annotations = {
+        "/decoder/decoder/generator/istft/stft/NonZero_output_0": [1, 1],
+        "/decoder/decoder/generator/istft/stft/Transpose_output_0": [1, 1],
+    }
+    float_annotations = {
+        "/decoder/decoder/generator/istft/stft/Slice_4_output_0": [1, 1, 600],
+        "/decoder/Gather_output_0": [1, 600],
+        "/decoder/Reshape_output_0": [1, 600],
+        "audio": [600],
+    }
+    for name, shape in int_annotations.items():
+        _upsert_value_info(
+            model,
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.INT64,
+                shape,
+            ),
+        )
+    for name, shape in float_annotations.items():
         _upsert_value_info(
             model,
             onnx.helper.make_tensor_value_info(
