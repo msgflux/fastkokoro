@@ -15,6 +15,7 @@ class FixedShapeVariantSpec:
     bert_attention_mask: bool = False
     bert_fixed_embedding_indices: bool = False
     bert_fixed_sequence_length: bool = False
+    bert_fixed_attention_reshapes: bool = False
 
 
 EXPERIMENTAL_VARIANTS = (
@@ -38,6 +39,14 @@ EXPERIMENTAL_VARIANTS = (
         bert_fixed_embedding_indices=True,
         bert_fixed_sequence_length=True,
     ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+    ),
     FixedShapeVariantSpec(name="output-pad", fixed_output_length=120000),
     FixedShapeVariantSpec(
         name="fixed-io",
@@ -56,6 +65,7 @@ def write_fixed_shape_variant(
     bert_attention_mask: bool = False,
     bert_fixed_embedding_indices: bool = False,
     bert_fixed_sequence_length: bool = False,
+    bert_fixed_attention_reshapes: bool = False,
 ) -> Path:
     model = onnx.load(model_path, load_external_data=False)
     if bert_attention_mask:
@@ -68,6 +78,8 @@ def write_fixed_shape_variant(
             apply_fixed_bert_embedding_indices(model, fixed_input_bucket)
         if bert_fixed_sequence_length:
             apply_fixed_bert_sequence_length(model, fixed_input_bucket)
+        if bert_fixed_attention_reshapes:
+            apply_fixed_bert_attention_reshapes(model, fixed_input_bucket)
     elif fixed_input_bucket is not None:
         apply_fixed_token_slice(model, fixed_input_bucket)
     if fixed_output_length is not None:
@@ -229,6 +241,43 @@ def apply_fixed_bert_sequence_length(
             node.input[0] = shape_vector_name
         elif node.name == "/encoder/bert/Unsqueeze_1":
             node.input[0] = seq_len_name
+
+
+def apply_fixed_bert_attention_reshapes(
+    model: onnx.ModelProto,
+    bucket: int,
+) -> None:
+    if bucket <= 1:
+        raise ValueError("fixed_input_bucket must be greater than 1")
+
+    reshape_qkv_name = "fastkokoro_bert_attention_reshape_qkv"
+    reshape_out_name = "fastkokoro_bert_attention_reshape_out"
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.array([1, bucket, 12, 64], dtype=np.int64),
+            reshape_qkv_name,
+        ),
+    )
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.array([1, bucket, 768], dtype=np.int64),
+            reshape_out_name,
+        ),
+    )
+
+    for node in model.graph.node:
+        if not node.name.startswith(
+            "/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention"
+        ):
+            continue
+        if node.op_type != "Reshape" or len(node.input) < 2:
+            continue
+        if node.name.endswith("/Reshape_3"):
+            node.input[1] = reshape_out_name
+        else:
+            node.input[1] = reshape_qkv_name
 
 
 def apply_fixed_token_slice(model: onnx.ModelProto, bucket: int) -> None:

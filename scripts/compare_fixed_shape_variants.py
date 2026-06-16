@@ -63,6 +63,7 @@ def main() -> int:
                 bert_attention_mask=variant.bert_attention_mask,
                 bert_fixed_embedding_indices=variant.bert_fixed_embedding_indices,
                 bert_fixed_sequence_length=variant.bert_fixed_sequence_length,
+                bert_fixed_attention_reshapes=variant.bert_fixed_attention_reshapes,
             )
 
         report = inspect_fixed_shape_readiness(model_path)
@@ -74,6 +75,7 @@ def main() -> int:
             "bert_attention_mask": variant.bert_attention_mask,
             "bert_fixed_embedding_indices": variant.bert_fixed_embedding_indices,
             "bert_fixed_sequence_length": variant.bert_fixed_sequence_length,
+            "bert_fixed_attention_reshapes": variant.bert_fixed_attention_reshapes,
             "dynamic_tensors": len(report.dynamic_tensors),
             "reachable_dynamic_tensors": len(report.reachable_dynamic_tensors),
             "reachable_dynamic_nodes": len(report.reachable_dynamic_nodes),
@@ -110,6 +112,7 @@ def _resolve_variant(
         bert_attention_mask=spec.bert_attention_mask,
         bert_fixed_embedding_indices=spec.bert_fixed_embedding_indices,
         bert_fixed_sequence_length=spec.bert_fixed_sequence_length,
+        bert_fixed_attention_reshapes=spec.bert_fixed_attention_reshapes,
     )
 
 

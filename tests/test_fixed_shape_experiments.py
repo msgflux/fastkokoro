@@ -1,6 +1,7 @@
 from onnx import TensorProto, helper
 
 from fastkokoro.fixed_shape_experiments import (
+    apply_fixed_bert_attention_reshapes,
     apply_fixed_bert_embedding_indices,
     apply_fixed_bert_sequence_length,
     apply_fixed_input_with_attention_mask,
@@ -171,3 +172,47 @@ def test_apply_fixed_bert_sequence_length_rewires_shape_path():
     nodes = {node.name: node for node in model.graph.node}
     assert nodes["/encoder/bert/Gather_1"].input[0] == "fastkokoro_bert_shape_vector"
     assert nodes["/encoder/bert/Unsqueeze_1"].input[0] == "fastkokoro_bert_seq_len"
+
+
+def test_apply_fixed_bert_attention_reshapes_reuses_constant_shapes():
+    model = _model()
+    model.graph.node.extend(
+        [
+            helper.make_node(
+                "Reshape",
+                inputs=["q", "shape_q"],
+                outputs=["q_out"],
+                name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape",
+            ),
+            helper.make_node(
+                "Reshape",
+                inputs=["k", "shape_k"],
+                outputs=["k_out"],
+                name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape_1",
+            ),
+            helper.make_node(
+                "Reshape",
+                inputs=["v", "shape_v"],
+                outputs=["v_out"],
+                name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape_2",
+            ),
+            helper.make_node(
+                "Reshape",
+                inputs=["o", "shape_o"],
+                outputs=["o_out"],
+                name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape_3",
+            ),
+        ]
+    )
+
+    apply_fixed_bert_attention_reshapes(model, 64)
+
+    nodes = {node.name: node for node in model.graph.node}
+    assert (
+        nodes["/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape"].input[1]
+        == "fastkokoro_bert_attention_reshape_qkv"
+    )
+    assert (
+        nodes["/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape_3"].input[1]
+        == "fastkokoro_bert_attention_reshape_out"
+    )
