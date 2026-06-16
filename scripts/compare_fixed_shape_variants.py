@@ -65,6 +65,12 @@ def main() -> int:
                 bert_fixed_sequence_length=variant.bert_fixed_sequence_length,
                 bert_fixed_attention_reshapes=variant.bert_fixed_attention_reshapes,
                 predictor_text_encoder_shapes=variant.predictor_text_encoder_shapes,
+                encoder_static_batch_annotations=(
+                    variant.encoder_static_batch_annotations
+                ),
+                graph_static_batch_annotations=(
+                    variant.graph_static_batch_annotations
+                ),
                 text_encoder_lstm_reshapes=variant.text_encoder_lstm_reshapes,
             )
 
@@ -79,6 +85,12 @@ def main() -> int:
             "bert_fixed_sequence_length": variant.bert_fixed_sequence_length,
             "bert_fixed_attention_reshapes": variant.bert_fixed_attention_reshapes,
             "predictor_text_encoder_shapes": variant.predictor_text_encoder_shapes,
+            "encoder_static_batch_annotations": (
+                variant.encoder_static_batch_annotations
+            ),
+            "graph_static_batch_annotations": (
+                variant.graph_static_batch_annotations
+            ),
             "text_encoder_lstm_reshapes": variant.text_encoder_lstm_reshapes,
             "dynamic_tensors": len(report.dynamic_tensors),
             "reachable_dynamic_tensors": len(report.reachable_dynamic_tensors),
@@ -118,6 +130,8 @@ def _resolve_variant(
         bert_fixed_sequence_length=spec.bert_fixed_sequence_length,
         bert_fixed_attention_reshapes=spec.bert_fixed_attention_reshapes,
         predictor_text_encoder_shapes=spec.predictor_text_encoder_shapes,
+        encoder_static_batch_annotations=spec.encoder_static_batch_annotations,
+        graph_static_batch_annotations=spec.graph_static_batch_annotations,
         text_encoder_lstm_reshapes=spec.text_encoder_lstm_reshapes,
     )
 

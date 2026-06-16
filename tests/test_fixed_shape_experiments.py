@@ -1,6 +1,7 @@
 from onnx import TensorProto, helper
 
 from fastkokoro.fixed_shape_experiments import (
+    apply_encoder_static_batch_annotations,
     apply_fixed_bert_attention_reshapes,
     apply_fixed_bert_embedding_indices,
     apply_fixed_bert_sequence_length,
@@ -8,6 +9,7 @@ from fastkokoro.fixed_shape_experiments import (
     apply_fixed_predictor_text_encoder_shapes,
     apply_fixed_text_encoder_lstm_reshapes,
     apply_fixed_token_slice,
+    apply_graph_static_batch_annotations,
     apply_output_pad,
 )
 
@@ -291,6 +293,90 @@ def test_apply_fixed_predictor_text_encoder_shapes_rewires_shape_helpers():
         nodes["/encoder/predictor/text_encoder/lstms.0/LSTM"].input[5]
         == "fastkokoro_predictor_lstm_state"
     )
+
+
+def test_apply_encoder_static_batch_annotations_only_fixes_encoder_leading_dim():
+    model = _model()
+    model.graph.node.extend(
+        [
+            helper.make_node(
+                "Identity",
+                inputs=["audio"],
+                outputs=["/encoder/hidden_output"],
+                name="/encoder/Identity",
+            ),
+            helper.make_node(
+                "Identity",
+                inputs=["audio"],
+                outputs=["/decoder/hidden_output"],
+                name="/decoder/Identity",
+            ),
+        ]
+    )
+    model.graph.value_info.extend(
+        [
+            helper.make_tensor_value_info(
+                "/encoder/hidden_output",
+                TensorProto.FLOAT,
+                ["batch", 64, 512],
+            ),
+            helper.make_tensor_value_info(
+                "/encoder/still_dynamic_output",
+                TensorProto.FLOAT,
+                ["batch", "sequence", 512],
+            ),
+            helper.make_tensor_value_info(
+                "/decoder/hidden_output",
+                TensorProto.FLOAT,
+                ["batch", 64, 512],
+            ),
+        ]
+    )
+
+    annotated = apply_encoder_static_batch_annotations(model)
+
+    values = {value.name: value for value in annotated.graph.value_info}
+    assert _shape(values["/encoder/hidden_output"]) == [1, 64, 512]
+    assert _shape(values["/encoder/still_dynamic_output"]) == [
+        "batch",
+        "sequence",
+        512,
+    ]
+    assert _shape(values["/decoder/hidden_output"]) == ["batch", 64, 512]
+
+
+def test_apply_graph_static_batch_annotations_also_fixes_decoder_leading_dim():
+    model = _model()
+    model.graph.value_info.extend(
+        [
+            helper.make_tensor_value_info(
+                "/encoder/hidden_output",
+                TensorProto.FLOAT,
+                ["batch", 64, 512],
+            ),
+            helper.make_tensor_value_info(
+                "/decoder/hidden_output",
+                TensorProto.FLOAT,
+                ["batch", 64, 512],
+            ),
+            helper.make_tensor_value_info(
+                "/decoder/still_dynamic_output",
+                TensorProto.FLOAT,
+                ["batch", 64, "time"],
+            ),
+        ]
+    )
+
+    annotated = apply_graph_static_batch_annotations(model)
+
+    values = {value.name: value for value in annotated.graph.value_info}
+    assert _shape(values["/encoder/hidden_output"]) == [1, 64, 512]
+    assert _shape(values["/decoder/hidden_output"]) == [1, 64, 512]
+    assert _shape(values["/decoder/still_dynamic_output"]) == [
+        "batch",
+        64,
+        "time",
+    ]
 
 
 def test_apply_fixed_text_encoder_lstm_reshapes_reuses_constant_shape():

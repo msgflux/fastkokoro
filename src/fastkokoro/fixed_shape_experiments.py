@@ -17,6 +17,8 @@ class FixedShapeVariantSpec:
     bert_fixed_sequence_length: bool = False
     bert_fixed_attention_reshapes: bool = False
     predictor_text_encoder_shapes: bool = False
+    encoder_static_batch_annotations: bool = False
+    graph_static_batch_annotations: bool = False
     text_encoder_lstm_reshapes: bool = False
 
 
@@ -59,6 +61,26 @@ EXPERIMENTAL_VARIANTS = (
         predictor_text_encoder_shapes=True,
     ),
     FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        encoder_static_batch_annotations=True,
+    ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated-all",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
+    ),
+    FixedShapeVariantSpec(
         name="attn-mask-bert-emb-len-shapes-pred-lstm",
         fixed_input_bucket=64,
         bert_attention_mask=True,
@@ -66,6 +88,7 @@ EXPERIMENTAL_VARIANTS = (
         bert_fixed_sequence_length=True,
         bert_fixed_attention_reshapes=True,
         predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
         text_encoder_lstm_reshapes=True,
     ),
     FixedShapeVariantSpec(name="output-pad", fixed_output_length=120000),
@@ -88,6 +111,8 @@ def write_fixed_shape_variant(
     bert_fixed_sequence_length: bool = False,
     bert_fixed_attention_reshapes: bool = False,
     predictor_text_encoder_shapes: bool = False,
+    encoder_static_batch_annotations: bool = False,
+    graph_static_batch_annotations: bool = False,
     text_encoder_lstm_reshapes: bool = False,
 ) -> Path:
     model = onnx.load(model_path, load_external_data=False)
@@ -105,6 +130,10 @@ def write_fixed_shape_variant(
             apply_fixed_bert_attention_reshapes(model, fixed_input_bucket)
         if predictor_text_encoder_shapes:
             apply_fixed_predictor_text_encoder_shapes(model, fixed_input_bucket)
+        if encoder_static_batch_annotations:
+            model = apply_encoder_static_batch_annotations(model)
+        if graph_static_batch_annotations:
+            model = apply_graph_static_batch_annotations(model)
         if text_encoder_lstm_reshapes:
             apply_fixed_text_encoder_lstm_reshapes(model, fixed_input_bucket)
     elif fixed_input_bucket is not None:
@@ -379,6 +408,49 @@ def apply_fixed_predictor_text_encoder_shapes(
             elif node.op_type == "LSTM" and len(node.input) >= 7:
                 node.input[5] = predictor_lstm_state
                 node.input[6] = predictor_lstm_state
+
+
+def apply_encoder_static_batch_annotations(
+    model: onnx.ModelProto,
+) -> onnx.ModelProto:
+    return apply_static_batch_annotations(model, prefixes=("/encoder/",))
+
+
+def apply_graph_static_batch_annotations(
+    model: onnx.ModelProto,
+) -> onnx.ModelProto:
+    annotated = model
+    for _ in range(4):
+        next_model = apply_static_batch_annotations(
+            annotated,
+            prefixes=("/encoder/", "/decoder/"),
+        )
+        if next_model.SerializeToString() == annotated.SerializeToString():
+            return next_model
+        annotated = next_model
+    return annotated
+
+
+def apply_static_batch_annotations(
+    model: onnx.ModelProto,
+    *,
+    prefixes: tuple[str, ...],
+) -> onnx.ModelProto:
+    inferred = onnx.shape_inference.infer_shapes(model)
+    for value in inferred.graph.value_info:
+        if not value.name.startswith(prefixes):
+            continue
+        tensor = value.type.tensor_type
+        if not tensor.HasField("shape") or not tensor.shape.dim:
+            continue
+        dims = tensor.shape.dim
+        if not dims[0].HasField("dim_param"):
+            continue
+        if any(not dim.HasField("dim_value") for dim in dims[1:]):
+            continue
+        dims[0].ClearField("dim_param")
+        dims[0].dim_value = 1
+    return inferred
 
 
 def apply_fixed_text_encoder_lstm_reshapes(
