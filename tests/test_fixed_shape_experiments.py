@@ -1,10 +1,13 @@
 from onnx import TensorProto, helper
 
 from fastkokoro.fixed_shape_experiments import (
+    apply_decoder_entry_annotations,
+    apply_decoder_entry_value_annotations,
     apply_encoder_static_batch_annotations,
     apply_fixed_bert_attention_reshapes,
     apply_fixed_bert_embedding_indices,
     apply_fixed_bert_sequence_length,
+    apply_fixed_encoder_core_lstm_states,
     apply_fixed_input_with_attention_mask,
     apply_fixed_predictor_text_encoder_shapes,
     apply_fixed_text_encoder_lstm_reshapes,
@@ -376,6 +379,80 @@ def test_apply_graph_static_batch_annotations_also_fixes_decoder_leading_dim():
         "batch",
         64,
         "time",
+    ]
+
+
+def test_apply_fixed_encoder_core_lstm_states_reuses_fixed_state():
+    model = _model()
+    model.graph.node.extend(
+        [
+            helper.make_node(
+                "LSTM",
+                inputs=["x", "w", "r", "b", "", "h0", "c0"],
+                outputs=["y", "yh", "yc"],
+                name="/encoder/predictor/lstm/LSTM",
+                hidden_size=256,
+            ),
+            helper.make_node(
+                "LSTM",
+                inputs=["x2", "w2", "r2", "b2", "", "h02", "c02"],
+                outputs=["y2", "yh2", "yc2"],
+                name="/encoder/shared/LSTM",
+                hidden_size=256,
+            ),
+        ]
+    )
+
+    apply_fixed_encoder_core_lstm_states(model)
+
+    nodes = {node.name: node for node in model.graph.node}
+    assert nodes["/encoder/predictor/lstm/LSTM"].input[5] == (
+        "fastkokoro_encoder_core_lstm_state"
+    )
+    assert nodes["/encoder/shared/LSTM"].input[6] == (
+        "fastkokoro_encoder_core_lstm_state"
+    )
+
+
+def test_apply_decoder_entry_annotations_adds_decoder_shape_hints():
+    model = _model()
+
+    apply_decoder_entry_annotations(model)
+
+    values = {value.name: value for value in model.graph.value_info}
+    assert _shape(values["/encoder/MatMul_1_output_0"]) == [1, 512, 1]
+    assert _shape(values["/decoder/decoder/asr_res/asr_res.0/Conv_output_0"]) == [
+        1,
+        64,
+        1,
+    ]
+
+
+def test_apply_decoder_entry_value_annotations_replaces_existing_value_info():
+    model = _model()
+    model.graph.value_info.extend(
+        [
+            helper.make_tensor_value_info(
+                "/encoder/MatMul_1_output_0",
+                TensorProto.FLOAT,
+                ["batch", 512, "time"],
+            ),
+            helper.make_tensor_value_info(
+                "/encoder/shared/ConstantOfShape_output_0",
+                TensorProto.FLOAT,
+                ["directions", "batch", "hidden"],
+            ),
+        ]
+    )
+
+    apply_decoder_entry_value_annotations(model)
+
+    values = {value.name: value for value in model.graph.value_info}
+    assert _shape(values["/encoder/MatMul_1_output_0"]) == [1, 512, 1]
+    assert _shape(values["/encoder/shared/ConstantOfShape_output_0"]) == [
+        2,
+        1,
+        256,
     ]
 
 

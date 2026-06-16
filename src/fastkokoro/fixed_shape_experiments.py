@@ -19,6 +19,9 @@ class FixedShapeVariantSpec:
     predictor_text_encoder_shapes: bool = False
     encoder_static_batch_annotations: bool = False
     graph_static_batch_annotations: bool = False
+    encoder_core_lstm_states: bool = False
+    decoder_entry_annotations: bool = False
+    decoder_entry_value_annotations: bool = False
     text_encoder_lstm_reshapes: bool = False
 
 
@@ -81,6 +84,31 @@ EXPERIMENTAL_VARIANTS = (
         graph_static_batch_annotations=True,
     ),
     FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated-all-entry",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
+        encoder_core_lstm_states=True,
+        decoder_entry_annotations=True,
+    ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-annotated-all-entry-values",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        graph_static_batch_annotations=True,
+        encoder_core_lstm_states=True,
+        decoder_entry_annotations=True,
+        decoder_entry_value_annotations=True,
+    ),
+    FixedShapeVariantSpec(
         name="attn-mask-bert-emb-len-shapes-pred-lstm",
         fixed_input_bucket=64,
         bert_attention_mask=True,
@@ -89,6 +117,9 @@ EXPERIMENTAL_VARIANTS = (
         bert_fixed_attention_reshapes=True,
         predictor_text_encoder_shapes=True,
         graph_static_batch_annotations=True,
+        encoder_core_lstm_states=True,
+        decoder_entry_annotations=True,
+        decoder_entry_value_annotations=True,
         text_encoder_lstm_reshapes=True,
     ),
     FixedShapeVariantSpec(name="output-pad", fixed_output_length=120000),
@@ -113,6 +144,9 @@ def write_fixed_shape_variant(
     predictor_text_encoder_shapes: bool = False,
     encoder_static_batch_annotations: bool = False,
     graph_static_batch_annotations: bool = False,
+    encoder_core_lstm_states: bool = False,
+    decoder_entry_annotations: bool = False,
+    decoder_entry_value_annotations: bool = False,
     text_encoder_lstm_reshapes: bool = False,
 ) -> Path:
     model = onnx.load(model_path, load_external_data=False)
@@ -134,6 +168,12 @@ def write_fixed_shape_variant(
             model = apply_encoder_static_batch_annotations(model)
         if graph_static_batch_annotations:
             model = apply_graph_static_batch_annotations(model)
+        if encoder_core_lstm_states:
+            apply_fixed_encoder_core_lstm_states(model)
+        if decoder_entry_annotations:
+            apply_decoder_entry_annotations(model)
+        if decoder_entry_value_annotations:
+            apply_decoder_entry_value_annotations(model)
         if text_encoder_lstm_reshapes:
             apply_fixed_text_encoder_lstm_reshapes(model, fixed_input_bucket)
     elif fixed_input_bucket is not None:
@@ -431,6 +471,64 @@ def apply_graph_static_batch_annotations(
     return annotated
 
 
+def apply_fixed_encoder_core_lstm_states(model: onnx.ModelProto) -> None:
+    state_name = "fastkokoro_encoder_core_lstm_state"
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.zeros((2, 1, 256), dtype=np.float16),
+            state_name,
+        ),
+    )
+    for node in model.graph.node:
+        if (
+            node.name in {"/encoder/predictor/lstm/LSTM", "/encoder/shared/LSTM"}
+            and len(node.input) >= 7
+        ):
+            node.input[5] = state_name
+            node.input[6] = state_name
+
+
+def apply_decoder_entry_annotations(model: onnx.ModelProto) -> None:
+    annotations = {
+        "/encoder/MatMul_1_output_0": [1, 512, 1],
+        "/encoder/MatMul_output_0": [1, 640, 1],
+        "/encoder/Transpose_1_output_0": [1, 1, 640],
+        "/decoder/decoder/asr_res/asr_res.0/Conv_output_0": [1, 64, 1],
+    }
+    existing = {value.name for value in model.graph.value_info}
+    for name, shape in annotations.items():
+        if name in existing:
+            continue
+        model.graph.value_info.append(
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.FLOAT16,
+                shape,
+            )
+        )
+
+
+def apply_decoder_entry_value_annotations(model: onnx.ModelProto) -> None:
+    annotations = {
+        "/encoder/MatMul_1_output_0": [1, 512, 1],
+        "/encoder/MatMul_output_0": [1, 640, 1],
+        "/encoder/Transpose_1_output_0": [1, 1, 640],
+        "/decoder/decoder/asr_res/asr_res.0/Conv_output_0": [1, 64, 1],
+        "/encoder/predictor/lstm/ConstantOfShape_output_0": [2, 1, 256],
+        "/encoder/shared/ConstantOfShape_output_0": [2, 1, 256],
+    }
+    for name, shape in annotations.items():
+        _upsert_value_info(
+            model,
+            onnx.helper.make_tensor_value_info(
+                name,
+                onnx.TensorProto.FLOAT16,
+                shape,
+            ),
+        )
+
+
 def apply_static_batch_annotations(
     model: onnx.ModelProto,
     *,
@@ -663,6 +761,19 @@ def _upsert_initializer(model: onnx.ModelProto, initializer: onnx.TensorProto) -
             model.graph.initializer[index].CopyFrom(initializer)
             return
     model.graph.initializer.append(initializer)
+
+
+def _upsert_value_info(
+    model: onnx.ModelProto,
+    value_info: onnx.ValueInfoProto,
+) -> None:
+    for collection_name in ("value_info", "output", "input"):
+        collection = getattr(model.graph, collection_name)
+        for index, existing in enumerate(collection):
+            if existing.name == value_info.name:
+                collection[index].CopyFrom(value_info)
+                return
+    model.graph.value_info.append(value_info)
 
 
 def _replace_or_append_node(

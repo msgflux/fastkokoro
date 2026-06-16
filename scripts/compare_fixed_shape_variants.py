@@ -71,6 +71,11 @@ def main() -> int:
                 graph_static_batch_annotations=(
                     variant.graph_static_batch_annotations
                 ),
+                encoder_core_lstm_states=variant.encoder_core_lstm_states,
+                decoder_entry_annotations=variant.decoder_entry_annotations,
+                decoder_entry_value_annotations=(
+                    variant.decoder_entry_value_annotations
+                ),
                 text_encoder_lstm_reshapes=variant.text_encoder_lstm_reshapes,
             )
 
@@ -90,6 +95,11 @@ def main() -> int:
             ),
             "graph_static_batch_annotations": (
                 variant.graph_static_batch_annotations
+            ),
+            "encoder_core_lstm_states": variant.encoder_core_lstm_states,
+            "decoder_entry_annotations": variant.decoder_entry_annotations,
+            "decoder_entry_value_annotations": (
+                variant.decoder_entry_value_annotations
             ),
             "text_encoder_lstm_reshapes": variant.text_encoder_lstm_reshapes,
             "dynamic_tensors": len(report.dynamic_tensors),
@@ -132,6 +142,9 @@ def _resolve_variant(
         predictor_text_encoder_shapes=spec.predictor_text_encoder_shapes,
         encoder_static_batch_annotations=spec.encoder_static_batch_annotations,
         graph_static_batch_annotations=spec.graph_static_batch_annotations,
+        encoder_core_lstm_states=spec.encoder_core_lstm_states,
+        decoder_entry_annotations=spec.decoder_entry_annotations,
+        decoder_entry_value_annotations=spec.decoder_entry_value_annotations,
         text_encoder_lstm_reshapes=spec.text_encoder_lstm_reshapes,
     )
 
