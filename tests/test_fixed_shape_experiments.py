@@ -5,6 +5,7 @@ from fastkokoro.fixed_shape_experiments import (
     apply_fixed_bert_embedding_indices,
     apply_fixed_bert_sequence_length,
     apply_fixed_input_with_attention_mask,
+    apply_fixed_predictor_text_encoder_shapes,
     apply_fixed_token_slice,
     apply_output_pad,
 )
@@ -179,6 +180,12 @@ def test_apply_fixed_bert_attention_reshapes_reuses_constant_shapes():
     model.graph.node.extend(
         [
             helper.make_node(
+                "Shape",
+                inputs=["shape_in"],
+                outputs=["shape_out"],
+                name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Shape",
+            ),
+            helper.make_node(
                 "Reshape",
                 inputs=["q", "shape_q"],
                 outputs=["q_out"],
@@ -202,6 +209,12 @@ def test_apply_fixed_bert_attention_reshapes_reuses_constant_shapes():
                 outputs=["o_out"],
                 name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape_3",
             ),
+            helper.make_node(
+                "Shape",
+                inputs=["transpose_in"],
+                outputs=["shape8_out"],
+                name="/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Shape_8",
+            ),
         ]
     )
 
@@ -209,10 +222,71 @@ def test_apply_fixed_bert_attention_reshapes_reuses_constant_shapes():
 
     nodes = {node.name: node for node in model.graph.node}
     assert (
+        nodes["/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Shape"].input[0]
+        == "fastkokoro_bert_attention_hidden_template"
+    )
+    assert (
         nodes["/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape"].input[1]
         == "fastkokoro_bert_attention_reshape_qkv"
     )
     assert (
+        nodes["/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Shape_8"].input[0]
+        == "fastkokoro_bert_attention_transposed_template"
+    )
+    assert (
         nodes["/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Reshape_3"].input[1]
         == "fastkokoro_bert_attention_reshape_out"
+    )
+
+
+def test_apply_fixed_predictor_text_encoder_shapes_rewires_shape_helpers():
+    model = _model()
+    model.graph.node.extend(
+        [
+            helper.make_node(
+                "Shape",
+                inputs=["hidden_in"],
+                outputs=["shape_hidden"],
+                name="/encoder/predictor/text_encoder/Shape",
+            ),
+            helper.make_node(
+                "Expand",
+                inputs=["speaker", "expand_shape"],
+                outputs=["speaker_expanded"],
+                name="/encoder/predictor/text_encoder/Expand",
+            ),
+            helper.make_node(
+                "Shape",
+                inputs=["concat_in"],
+                outputs=["shape_concat"],
+                name="/encoder/predictor/text_encoder/lstms.0/Shape",
+            ),
+            helper.make_node(
+                "LSTM",
+                inputs=["x", "w", "r", "b", "", "h0", "c0"],
+                outputs=["y", "yh", "yc"],
+                name="/encoder/predictor/text_encoder/lstms.0/LSTM",
+                hidden_size=256,
+            ),
+        ]
+    )
+
+    apply_fixed_predictor_text_encoder_shapes(model, 64)
+
+    nodes = {node.name: node for node in model.graph.node}
+    assert (
+        nodes["/encoder/predictor/text_encoder/Shape"].input[0]
+        == "fastkokoro_predictor_hidden_template"
+    )
+    assert (
+        nodes["/encoder/predictor/text_encoder/Expand"].input[1]
+        == "fastkokoro_predictor_expand_shape"
+    )
+    assert (
+        nodes["/encoder/predictor/text_encoder/lstms.0/Shape"].input[0]
+        == "fastkokoro_predictor_concat_template"
+    )
+    assert (
+        nodes["/encoder/predictor/text_encoder/lstms.0/LSTM"].input[5]
+        == "fastkokoro_predictor_lstm_state"
     )

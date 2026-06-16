@@ -16,6 +16,7 @@ class FixedShapeVariantSpec:
     bert_fixed_embedding_indices: bool = False
     bert_fixed_sequence_length: bool = False
     bert_fixed_attention_reshapes: bool = False
+    predictor_text_encoder_shapes: bool = False
 
 
 EXPERIMENTAL_VARIANTS = (
@@ -47,6 +48,15 @@ EXPERIMENTAL_VARIANTS = (
         bert_fixed_sequence_length=True,
         bert_fixed_attention_reshapes=True,
     ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+    ),
     FixedShapeVariantSpec(name="output-pad", fixed_output_length=120000),
     FixedShapeVariantSpec(
         name="fixed-io",
@@ -66,6 +76,7 @@ def write_fixed_shape_variant(
     bert_fixed_embedding_indices: bool = False,
     bert_fixed_sequence_length: bool = False,
     bert_fixed_attention_reshapes: bool = False,
+    predictor_text_encoder_shapes: bool = False,
 ) -> Path:
     model = onnx.load(model_path, load_external_data=False)
     if bert_attention_mask:
@@ -80,6 +91,8 @@ def write_fixed_shape_variant(
             apply_fixed_bert_sequence_length(model, fixed_input_bucket)
         if bert_fixed_attention_reshapes:
             apply_fixed_bert_attention_reshapes(model, fixed_input_bucket)
+        if predictor_text_encoder_shapes:
+            apply_fixed_predictor_text_encoder_shapes(model, fixed_input_bucket)
     elif fixed_input_bucket is not None:
         apply_fixed_token_slice(model, fixed_input_bucket)
     if fixed_output_length is not None:
@@ -266,18 +279,92 @@ def apply_fixed_bert_attention_reshapes(
             reshape_out_name,
         ),
     )
+    hidden_template_name = "fastkokoro_bert_attention_hidden_template"
+    transposed_template_name = "fastkokoro_bert_attention_transposed_template"
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.zeros((1, bucket, 768), dtype=np.float16),
+            hidden_template_name,
+        ),
+    )
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.zeros((1, 12, bucket, 64), dtype=np.float16),
+            transposed_template_name,
+        ),
+    )
 
     for node in model.graph.node:
         if not node.name.startswith(
             "/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention"
         ):
             continue
-        if node.op_type != "Reshape" or len(node.input) < 2:
+        if node.op_type == "Reshape" and len(node.input) >= 2:
+            if node.name.endswith("/Reshape_3"):
+                node.input[1] = reshape_out_name
+            else:
+                node.input[1] = reshape_qkv_name
             continue
-        if node.name.endswith("/Reshape_3"):
-            node.input[1] = reshape_out_name
-        else:
-            node.input[1] = reshape_qkv_name
+        if node.op_type == "Shape" and node.input:
+            if node.name.endswith("/Shape_8"):
+                node.input[0] = transposed_template_name
+            else:
+                node.input[0] = hidden_template_name
+
+
+def apply_fixed_predictor_text_encoder_shapes(
+    model: onnx.ModelProto,
+    bucket: int,
+) -> None:
+    if bucket <= 1:
+        raise ValueError("fixed_input_bucket must be greater than 1")
+
+    predictor_hidden_template = "fastkokoro_predictor_hidden_template"
+    predictor_concat_template = "fastkokoro_predictor_concat_template"
+    predictor_expand_shape = "fastkokoro_predictor_expand_shape"
+    predictor_lstm_state = "fastkokoro_predictor_lstm_state"
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.zeros((1, bucket, 512), dtype=np.float16),
+            predictor_hidden_template,
+        ),
+    )
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.zeros((1, bucket, 640), dtype=np.float16),
+            predictor_concat_template,
+        ),
+    )
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.array([1, bucket, 128], dtype=np.int64),
+            predictor_expand_shape,
+        ),
+    )
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.zeros((2, 1, 256), dtype=np.float16),
+            predictor_lstm_state,
+        ),
+    )
+
+    for node in model.graph.node:
+        if node.name == "/encoder/predictor/text_encoder/Shape":
+            node.input[0] = predictor_hidden_template
+        elif node.name == "/encoder/predictor/text_encoder/Expand":
+            node.input[1] = predictor_expand_shape
+        elif node.name.startswith("/encoder/predictor/text_encoder/lstms."):
+            if node.op_type == "Shape":
+                node.input[0] = predictor_concat_template
+            elif node.op_type == "LSTM" and len(node.input) >= 7:
+                node.input[5] = predictor_lstm_state
+                node.input[6] = predictor_lstm_state
 
 
 def apply_fixed_token_slice(model: onnx.ModelProto, bucket: int) -> None:
