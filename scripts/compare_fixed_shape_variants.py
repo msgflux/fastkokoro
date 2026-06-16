@@ -65,6 +65,7 @@ def main() -> int:
                 bert_fixed_sequence_length=variant.bert_fixed_sequence_length,
                 bert_fixed_attention_reshapes=variant.bert_fixed_attention_reshapes,
                 predictor_text_encoder_shapes=variant.predictor_text_encoder_shapes,
+                text_encoder_lstm_reshapes=variant.text_encoder_lstm_reshapes,
             )
 
         report = inspect_fixed_shape_readiness(model_path)
@@ -78,6 +79,7 @@ def main() -> int:
             "bert_fixed_sequence_length": variant.bert_fixed_sequence_length,
             "bert_fixed_attention_reshapes": variant.bert_fixed_attention_reshapes,
             "predictor_text_encoder_shapes": variant.predictor_text_encoder_shapes,
+            "text_encoder_lstm_reshapes": variant.text_encoder_lstm_reshapes,
             "dynamic_tensors": len(report.dynamic_tensors),
             "reachable_dynamic_tensors": len(report.reachable_dynamic_tensors),
             "reachable_dynamic_nodes": len(report.reachable_dynamic_nodes),
@@ -116,6 +118,7 @@ def _resolve_variant(
         bert_fixed_sequence_length=spec.bert_fixed_sequence_length,
         bert_fixed_attention_reshapes=spec.bert_fixed_attention_reshapes,
         predictor_text_encoder_shapes=spec.predictor_text_encoder_shapes,
+        text_encoder_lstm_reshapes=spec.text_encoder_lstm_reshapes,
     )
 
 

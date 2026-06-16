@@ -17,6 +17,7 @@ class FixedShapeVariantSpec:
     bert_fixed_sequence_length: bool = False
     bert_fixed_attention_reshapes: bool = False
     predictor_text_encoder_shapes: bool = False
+    text_encoder_lstm_reshapes: bool = False
 
 
 EXPERIMENTAL_VARIANTS = (
@@ -57,6 +58,16 @@ EXPERIMENTAL_VARIANTS = (
         bert_fixed_attention_reshapes=True,
         predictor_text_encoder_shapes=True,
     ),
+    FixedShapeVariantSpec(
+        name="attn-mask-bert-emb-len-shapes-pred-lstm",
+        fixed_input_bucket=64,
+        bert_attention_mask=True,
+        bert_fixed_embedding_indices=True,
+        bert_fixed_sequence_length=True,
+        bert_fixed_attention_reshapes=True,
+        predictor_text_encoder_shapes=True,
+        text_encoder_lstm_reshapes=True,
+    ),
     FixedShapeVariantSpec(name="output-pad", fixed_output_length=120000),
     FixedShapeVariantSpec(
         name="fixed-io",
@@ -77,6 +88,7 @@ def write_fixed_shape_variant(
     bert_fixed_sequence_length: bool = False,
     bert_fixed_attention_reshapes: bool = False,
     predictor_text_encoder_shapes: bool = False,
+    text_encoder_lstm_reshapes: bool = False,
 ) -> Path:
     model = onnx.load(model_path, load_external_data=False)
     if bert_attention_mask:
@@ -93,6 +105,8 @@ def write_fixed_shape_variant(
             apply_fixed_bert_attention_reshapes(model, fixed_input_bucket)
         if predictor_text_encoder_shapes:
             apply_fixed_predictor_text_encoder_shapes(model, fixed_input_bucket)
+        if text_encoder_lstm_reshapes:
+            apply_fixed_text_encoder_lstm_reshapes(model, fixed_input_bucket)
     elif fixed_input_bucket is not None:
         apply_fixed_token_slice(model, fixed_input_bucket)
     if fixed_output_length is not None:
@@ -365,6 +379,33 @@ def apply_fixed_predictor_text_encoder_shapes(
             elif node.op_type == "LSTM" and len(node.input) >= 7:
                 node.input[5] = predictor_lstm_state
                 node.input[6] = predictor_lstm_state
+
+
+def apply_fixed_text_encoder_lstm_reshapes(
+    model: onnx.ModelProto,
+    bucket: int,
+) -> None:
+    if bucket <= 1:
+        raise ValueError("fixed_input_bucket must be greater than 1")
+
+    text_encoder_lstm_shape = "fastkokoro_text_encoder_lstm_reshape"
+    _upsert_initializer(
+        model,
+        onnx.numpy_helper.from_array(
+            np.array([1, bucket, 512], dtype=np.int64),
+            text_encoder_lstm_shape,
+        ),
+    )
+
+    target_prefixes = (
+        "/encoder/text_encoder/lstm/Reshape",
+        "/encoder/predictor/text_encoder/lstms.0/Reshape",
+        "/encoder/predictor/text_encoder/lstms.2/Reshape",
+        "/encoder/predictor/text_encoder/lstms.4/Reshape",
+    )
+    for node in model.graph.node:
+        if node.name.startswith(target_prefixes) and len(node.input) >= 2:
+            node.input[1] = text_encoder_lstm_shape
 
 
 def apply_fixed_token_slice(model: onnx.ModelProto, bucket: int) -> None:

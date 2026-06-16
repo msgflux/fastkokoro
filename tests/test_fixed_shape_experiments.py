@@ -6,6 +6,7 @@ from fastkokoro.fixed_shape_experiments import (
     apply_fixed_bert_sequence_length,
     apply_fixed_input_with_attention_mask,
     apply_fixed_predictor_text_encoder_shapes,
+    apply_fixed_text_encoder_lstm_reshapes,
     apply_fixed_token_slice,
     apply_output_pad,
 )
@@ -289,4 +290,46 @@ def test_apply_fixed_predictor_text_encoder_shapes_rewires_shape_helpers():
     assert (
         nodes["/encoder/predictor/text_encoder/lstms.0/LSTM"].input[5]
         == "fastkokoro_predictor_lstm_state"
+    )
+
+
+def test_apply_fixed_text_encoder_lstm_reshapes_reuses_constant_shape():
+    model = _model()
+    model.graph.node.extend(
+        [
+            helper.make_node(
+                "Reshape",
+                inputs=["x", "shape_a"],
+                outputs=["y"],
+                name="/encoder/text_encoder/lstm/Reshape",
+            ),
+            helper.make_node(
+                "Reshape",
+                inputs=["x0", "shape_b"],
+                outputs=["y0"],
+                name="/encoder/predictor/text_encoder/lstms.0/Reshape",
+            ),
+            helper.make_node(
+                "Reshape",
+                inputs=["x2", "shape_c"],
+                outputs=["y2"],
+                name="/encoder/predictor/text_encoder/lstms.2/Reshape",
+            ),
+            helper.make_node(
+                "Reshape",
+                inputs=["x4", "shape_d"],
+                outputs=["y4"],
+                name="/encoder/predictor/text_encoder/lstms.4/Reshape",
+            ),
+        ]
+    )
+
+    apply_fixed_text_encoder_lstm_reshapes(model, 64)
+
+    nodes = {node.name: node for node in model.graph.node}
+    assert nodes["/encoder/text_encoder/lstm/Reshape"].input[1] == (
+        "fastkokoro_text_encoder_lstm_reshape"
+    )
+    assert nodes["/encoder/predictor/text_encoder/lstms.4/Reshape"].input[1] == (
+        "fastkokoro_text_encoder_lstm_reshape"
     )
