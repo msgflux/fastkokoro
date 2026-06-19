@@ -9,6 +9,7 @@ except ModuleNotFoundError:
     ort = None
 
 from fastkokoro.config import Settings
+from fastkokoro.onnx_simplification import resolve_cpu_simplified_model_path
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -81,6 +82,7 @@ def create_session(model_path: Path, settings: Settings):
             "Requested ONNX Runtime provider(s) are not available: "
             f"{', '.join(missing)}. Available providers: {', '.join(available)}"
         )
+    model_path = resolve_cpu_simplified_model_path(model_path, settings, providers)
     provider_options = [
         settings.onnx_provider_options.get(provider, {}) for provider in providers
     ]

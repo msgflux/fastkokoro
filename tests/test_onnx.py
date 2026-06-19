@@ -7,6 +7,7 @@ import pytest
 
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
+from fastkokoro.onnx_simplification import resolve_cpu_simplified_model_path
 
 
 class FakeSessionOptions:
@@ -82,10 +83,19 @@ def _settings(**overrides):
         onnx_conv_adain_custom_op_library=None,
         warmup_multi_shape=False,
         onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        onnx_ttfc_attention_mask_bucket=None,
+        onnx_ttfc_model_path=None,
+        onnx_ttfc_warm_session=False,
+        onnx_ttfc_warm_texts=("Hello.", "Good morning."),
+        onnx_ttfc_warm_token_counts=(1, 2, 3),
         jit=False,
         warmup=False,
-        warmup_text="Hello there. This is a warmup request for streaming speech generation.",
+        warmup_text=(
+            "Hello there. This is a warmup request for streaming speech generation."
+        ),
         warmup_request=False,
+        runtime_tail_trim_ms=150,
+        runtime_tail_fade_ms=72,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,
@@ -141,6 +151,46 @@ def test_create_session_uses_configured_providers():
     assert init.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
     assert init.call_args.kwargs["provider_options"] == [{}]
     assert session.get_providers.called
+
+
+def test_resolve_cpu_simplified_model_path_generates_cached_model(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"onnx")
+    cached = tmp_path / "cache" / "model.sim.onnx"
+
+    with (
+        patch(
+            "fastkokoro.onnx_simplification._simplified_cache_path",
+            return_value=cached,
+        ),
+        patch(
+            "fastkokoro.onnx_simplification.simplify_onnx_model",
+            return_value=cached,
+        ) as simplify,
+    ):
+        result = resolve_cpu_simplified_model_path(
+            model_path,
+            _settings(cache_dir=tmp_path / "cache"),
+            ["CPUExecutionProvider"],
+        )
+
+    assert result == cached
+    simplify.assert_called_once_with(model_path, cached)
+
+
+def test_resolve_cpu_simplified_model_path_skips_gpu_provider(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"onnx")
+
+    with patch("fastkokoro.onnx_simplification.simplify_onnx_model") as simplify:
+        result = resolve_cpu_simplified_model_path(
+            model_path,
+            _settings(cache_dir=tmp_path / "cache"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+
+    assert result == model_path
+    simplify.assert_not_called()
 
 
 def test_create_session_auto_uses_all_available_providers():
