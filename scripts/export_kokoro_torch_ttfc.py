@@ -314,6 +314,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--patch-scatterless-sine-source",
+        action="store_true",
+        help=(
+            "Patch SineGen in-place phase updates into slice/cat operations to "
+            "avoid ScatterND while preserving source randomness."
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="cpu",
         choices=("cpu", "cuda"),
@@ -349,6 +357,8 @@ def main() -> int:
         patch_deterministic_source_for_export(kmodel)
     if args.patch_deterministic_sine_source:
         patch_deterministic_sine_source_for_export(kmodel)
+    if args.patch_scatterless_sine_source:
+        patch_scatterless_sine_source_for_export(kmodel)
     internal_dtype = torch.float16 if args.precision == "fp16" else torch.float32
     decoder_dtype = (
         torch.float16
@@ -663,6 +673,50 @@ def patch_deterministic_sine_source_for_export(kmodel: torch.nn.Module) -> None:
         type(sine_generator),
     )
     source.forward = source_forward.__get__(source, type(source))
+
+
+def patch_scatterless_sine_source_for_export(kmodel: torch.nn.Module) -> None:
+    sine_generator = kmodel.decoder.generator.m_source.l_sin_gen
+
+    def sine_forward(self, f0_values):
+        rad_values = (f0_values / self.sampling_rate) % 1
+        random_tail = torch.rand(
+            f0_values.shape[0],
+            f0_values.shape[2] - 1,
+            device=f0_values.device,
+            dtype=f0_values.dtype,
+        )
+        rand_ini = torch.cat(
+            [
+                torch.zeros(
+                    f0_values.shape[0],
+                    1,
+                    device=f0_values.device,
+                    dtype=f0_values.dtype,
+                ),
+                random_tail,
+            ],
+            dim=1,
+        )
+        first_frame = rad_values[:, :1, :] + rand_ini.unsqueeze(1)
+        rad_values = torch.cat([first_frame, rad_values[:, 1:, :]], dim=1)
+        rad_values = functional.interpolate(
+            rad_values.transpose(1, 2),
+            scale_factor=1 / self.upsample_scale,
+            mode="linear",
+        ).transpose(1, 2)
+        phase = torch.cumsum(rad_values, dim=1) * 2 * torch.pi
+        phase = functional.interpolate(
+            phase.transpose(1, 2) * self.upsample_scale,
+            scale_factor=self.upsample_scale,
+            mode="linear",
+        ).transpose(1, 2)
+        return torch.sin(phase)
+
+    sine_generator._f02sine = sine_forward.__get__(
+        sine_generator,
+        type(sine_generator),
+    )
 
 
 if __name__ == "__main__":
