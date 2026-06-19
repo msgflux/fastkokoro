@@ -210,24 +210,24 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         pred_dur: torch.LongTensor,
         dtype: torch.dtype,
     ) -> torch.FloatTensor:
+        if self.fixed_alignment_frames is not None:
+            frame_positions = torch.arange(
+                self.fixed_alignment_frames,
+                device=self.kmodel.device,
+            )
+            ends = torch.cumsum(pred_dur, dim=0).unsqueeze(1)
+            starts = (ends.squeeze(1) - pred_dur).unsqueeze(1)
+            alignment = (frame_positions.unsqueeze(0) >= starts) & (
+                frame_positions.unsqueeze(0) < ends
+            )
+            return alignment.unsqueeze(0).to(dtype=dtype, device=self.kmodel.device)
+
         indices = torch.repeat_interleave(
             torch.arange(token_count, device=self.kmodel.device),
             pred_dur,
         )
-        if self.fixed_alignment_frames is None:
-            frame_count = indices.shape[0]
-            frame_indices = torch.arange(frame_count, device=self.kmodel.device)
-            pred_aln_trg = torch.zeros(
-                (token_count, frame_count),
-                device=self.kmodel.device,
-                dtype=dtype,
-            )
-            pred_aln_trg[indices, frame_indices] = 1
-            return pred_aln_trg.unsqueeze(0).to(self.kmodel.device)
-
-        frame_count = self.fixed_alignment_frames
-        indices = indices[:frame_count]
-        frame_indices = torch.arange(indices.shape[0], device=self.kmodel.device)
+        frame_count = indices.shape[0]
+        frame_indices = torch.arange(frame_count, device=self.kmodel.device)
         pred_aln_trg = torch.zeros(
             (token_count, frame_count),
             device=self.kmodel.device,
@@ -306,6 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--patch-deterministic-sine-source",
+        action="store_true",
+        help=(
+            "Patch the NSF source module to keep deterministic sine excitation "
+            "while removing random source noise."
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="cpu",
         choices=("cpu", "cuda"),
@@ -339,6 +347,8 @@ def main() -> int:
         patch_fixed_lstm_for_export(kmodel)
     if args.patch_deterministic_source:
         patch_deterministic_source_for_export(kmodel)
+    if args.patch_deterministic_sine_source:
+        patch_deterministic_sine_source_for_export(kmodel)
     internal_dtype = torch.float16 if args.precision == "fp16" else torch.float32
     decoder_dtype = (
         torch.float16
@@ -602,6 +612,56 @@ def patch_deterministic_source_for_export(kmodel: torch.nn.Module) -> None:
         noise = torch.zeros_like(uv)
         return sine_merge, noise, uv
 
+    source.forward = source_forward.__get__(source, type(source))
+
+
+def patch_deterministic_sine_source_for_export(kmodel: torch.nn.Module) -> None:
+    source = kmodel.decoder.generator.m_source
+    sine_generator = source.l_sin_gen
+
+    def sine_forward(self, f0_values):
+        rad_values = (f0_values / self.sampling_rate) % 1
+        rad_values = functional.interpolate(
+            rad_values.transpose(1, 2),
+            scale_factor=1 / self.upsample_scale,
+            mode="linear",
+        ).transpose(1, 2)
+        phase = torch.cumsum(rad_values, dim=1) * 2 * torch.pi
+        phase = functional.interpolate(
+            phase.transpose(1, 2) * self.upsample_scale,
+            scale_factor=self.upsample_scale,
+            mode="linear",
+        ).transpose(1, 2)
+        return torch.sin(phase)
+
+    def sine_gen_forward(self, f0):
+        harmonic_factors = torch.arange(
+            1,
+            self.harmonic_num + 2,
+            device=f0.device,
+            dtype=f0.dtype,
+        ).view(1, 1, -1)
+        sine_waves = self._f02sine(f0 * harmonic_factors) * self.sine_amp
+        uv = self._f02uv(f0).to(dtype=f0.dtype)
+        sine_waves = sine_waves * uv
+        noise = torch.zeros_like(sine_waves)
+        return sine_waves, uv, noise
+
+    def source_forward(self, x):
+        with torch.no_grad():
+            sine_wavs, uv, _ = self.l_sin_gen(x)
+        sine_merge = self.l_tanh(self.l_linear(sine_wavs))
+        noise = torch.zeros_like(uv)
+        return sine_merge, noise, uv
+
+    sine_generator._f02sine = sine_forward.__get__(
+        sine_generator,
+        type(sine_generator),
+    )
+    sine_generator.forward = sine_gen_forward.__get__(
+        sine_generator,
+        type(sine_generator),
+    )
     source.forward = source_forward.__get__(source, type(source))
 
 
