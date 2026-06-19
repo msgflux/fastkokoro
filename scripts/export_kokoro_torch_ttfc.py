@@ -86,7 +86,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         waveform: torch.FloatTensor,
         duration: torch.LongTensor,
     ) -> torch.FloatTensor:
-        sample_count = waveform.shape[-1]
+        sample_count = self.fixed_output_samples or waveform.shape[-1]
         active_frames = duration.sum()
         if self.fixed_alignment_frames is not None:
             max_frames = torch.tensor(
