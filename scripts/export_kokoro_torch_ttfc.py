@@ -322,6 +322,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--patch-split-adain",
+        action="store_true",
+        help=(
+            "Split AdaIN affine projections into gamma/beta Linear modules to "
+            "avoid chunk-generated Slice subgraphs."
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="cpu",
         choices=("cpu", "cuda"),
@@ -359,6 +367,8 @@ def main() -> int:
         patch_deterministic_sine_source_for_export(kmodel)
     if args.patch_scatterless_sine_source:
         patch_scatterless_sine_source_for_export(kmodel)
+    if args.patch_split_adain:
+        patch_split_adain_for_export(kmodel)
     internal_dtype = torch.float16 if args.precision == "fp16" else torch.float32
     decoder_dtype = (
         torch.float16
@@ -717,6 +727,63 @@ def patch_scatterless_sine_source_for_export(kmodel: torch.nn.Module) -> None:
         sine_generator,
         type(sine_generator),
     )
+
+
+def patch_split_adain_for_export(kmodel: torch.nn.Module) -> None:
+    for module in kmodel.modules():
+        if module.__class__.__name__ == "AdaIN1d":
+            split_adain1d_projection(module)
+        elif module.__class__.__name__ == "AdaLayerNorm":
+            split_adalayernorm_projection(module)
+
+
+def split_adain1d_projection(module: torch.nn.Module) -> None:
+    channels = module.fc.out_features // 2
+    module.fc_gamma = build_linear_slice(module.fc, 0, channels)
+    module.fc_beta = build_linear_slice(module.fc, channels, channels * 2)
+
+    def forward(self, x, s):
+        gamma = self.fc_gamma(s).view(s.shape[0], channels, 1)
+        beta = self.fc_beta(s).view(s.shape[0], channels, 1)
+        return (1 + gamma) * self.norm(x) + beta
+
+    module.forward = forward.__get__(module, type(module))
+
+
+def split_adalayernorm_projection(module: torch.nn.Module) -> None:
+    channels = module.channels
+    module.fc_gamma = build_linear_slice(module.fc, 0, channels)
+    module.fc_beta = build_linear_slice(module.fc, channels, channels * 2)
+
+    def forward(self, x, s):
+        x = x.transpose(-1, -2)
+        x = x.transpose(1, -1)
+        gamma = self.fc_gamma(s).view(s.shape[0], channels, 1).transpose(1, -1)
+        beta = self.fc_beta(s).view(s.shape[0], channels, 1).transpose(1, -1)
+        x = functional.layer_norm(x, (channels,), eps=self.eps)
+        x = (1 + gamma) * x + beta
+        return x.transpose(1, -1).transpose(-1, -2)
+
+    module.forward = forward.__get__(module, type(module))
+
+
+def build_linear_slice(
+    linear: torch.nn.Linear,
+    start: int,
+    end: int,
+) -> torch.nn.Linear:
+    sliced = torch.nn.Linear(
+        linear.in_features,
+        end - start,
+        bias=linear.bias is not None,
+        device=linear.weight.device,
+        dtype=linear.weight.dtype,
+    )
+    with torch.no_grad():
+        sliced.weight.copy_(linear.weight[start:end])
+        if linear.bias is not None:
+            sliced.bias.copy_(linear.bias[start:end])
+    return sliced
 
 
 if __name__ == "__main__":
