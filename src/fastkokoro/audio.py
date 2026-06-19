@@ -47,6 +47,34 @@ def trim_audio_part(
     return trimmed
 
 
+def trim_audio_tail(
+    samples: np.ndarray,
+    *,
+    sample_rate: int,
+    trim_ms: int,
+    fade_ms: int,
+) -> np.ndarray:
+    samples_f32 = np.asarray(samples, dtype=np.float32)
+    if trim_ms <= 0 or samples_f32.ndim != 1:
+        return samples_f32
+
+    trim_samples = int(sample_rate * trim_ms / 1000)
+    if trim_samples <= 0 or trim_samples >= samples_f32.shape[0]:
+        return samples_f32
+
+    output = samples_f32[:-trim_samples].copy()
+    fade_samples = int(sample_rate * fade_ms / 1000)
+    fade_samples = min(max(fade_samples, 0), output.shape[0])
+    if fade_samples > 0:
+        output[-fade_samples:] *= np.linspace(
+            1.0,
+            0.0,
+            fade_samples,
+            dtype=np.float32,
+        )
+    return output
+
+
 def encode_audio(
     samples: np.ndarray,
     sample_rate: int,

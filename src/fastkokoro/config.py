@@ -28,16 +28,32 @@ DEFAULT_ONNX_ADAIN_FUSION = False
 DEFAULT_ONNX_CONV_ADAIN_FUSION = False
 DEFAULT_WARMUP_MULTI_SHAPE = False
 DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
+DEFAULT_ONNX_TTFC_ATTENTION_MASK_BUCKET = None
+DEFAULT_ONNX_TTFC_MODEL_PATH = None
+DEFAULT_ONNX_TTFC_WARM_SESSION = False
+DEFAULT_ONNX_TTFC_WARM_TEXTS = (
+    "Hello.",
+    "Hello world.",
+    "Ola.",
+    "Hi there.",
+    "Good morning.",
+    "This is a short latency probe.",
+)
+DEFAULT_ONNX_TTFC_WARM_TOKEN_COUNTS = (1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 22)
 DEFAULT_JIT = True
 DEFAULT_PROFILE = False
 DEFAULT_WARMUP_REQUEST = False
-DEFAULT_WARMUP_TEXT = "Hello there. This is a warmup request for streaming speech generation."
+DEFAULT_WARMUP_TEXT = (
+    "Hello there. This is a warmup request for streaming speech generation."
+)
+DEFAULT_RUNTIME_TAIL_TRIM_MS = 150
+DEFAULT_RUNTIME_TAIL_FADE_MS = 72
 DEFAULT_STREAM_STRATEGY = "adaptive"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
-DEFAULT_STREAM_MAX_SEGMENT_CHARS = 32
-DEFAULT_STREAM_MAX_SEGMENT_WORDS = 2
+DEFAULT_STREAM_MAX_SEGMENT_CHARS = 8
+DEFAULT_STREAM_MAX_SEGMENT_WORDS = 1
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS = 12
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS = 48
@@ -86,10 +102,17 @@ class Settings:
     onnx_conv_adain_custom_op_library: Path | None
     warmup_multi_shape: bool
     onnx_ttfc_shape_buckets: tuple[int, ...]
+    onnx_ttfc_attention_mask_bucket: int | None
+    onnx_ttfc_model_path: Path | None
+    onnx_ttfc_warm_session: bool
+    onnx_ttfc_warm_texts: tuple[str, ...]
+    onnx_ttfc_warm_token_counts: tuple[int, ...]
     jit: bool
     warmup: bool
     warmup_text: str
     warmup_request: bool
+    runtime_tail_trim_ms: int
+    runtime_tail_fade_ms: int
     profile: bool
     profile_dir: Path
     profile_warmup: bool
@@ -122,6 +145,7 @@ class Settings:
         conv_adain_custom_op_library = os.getenv(
             "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY"
         )
+        ttfc_model_path = os.getenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH")
         cors_allow_origins = os.getenv("FASTKOKORO_CORS_ALLOW_ORIGINS")
         cors_allow_methods = os.getenv("FASTKOKORO_CORS_ALLOW_METHODS")
         cors_allow_headers = os.getenv("FASTKOKORO_CORS_ALLOW_HEADERS")
@@ -241,6 +265,29 @@ class Settings:
                 name="FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS",
             )
             or DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
+            onnx_ttfc_attention_mask_bucket=parse_optional_positive_int(
+                os.getenv(
+                    "FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET",
+                    "",
+                ),
+                name="FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET",
+            ),
+            onnx_ttfc_model_path=(
+                Path(ttfc_model_path).expanduser() if ttfc_model_path else None
+            ),
+            onnx_ttfc_warm_session=parse_bool(
+                os.getenv("FASTKOKORO_ONNX_TTFC_WARM_SESSION"),
+                default=DEFAULT_ONNX_TTFC_WARM_SESSION,
+            ),
+            onnx_ttfc_warm_texts=parse_csv(
+                os.getenv("FASTKOKORO_ONNX_TTFC_WARM_TEXTS")
+            )
+            or DEFAULT_ONNX_TTFC_WARM_TEXTS,
+            onnx_ttfc_warm_token_counts=parse_int_csv(
+                os.getenv("FASTKOKORO_ONNX_TTFC_WARM_TOKEN_COUNTS"),
+                name="FASTKOKORO_ONNX_TTFC_WARM_TOKEN_COUNTS",
+            )
+            or DEFAULT_ONNX_TTFC_WARM_TOKEN_COUNTS,
             jit=parse_bool(
                 os.getenv("FASTKOKORO_JIT"),
                 default=DEFAULT_JIT,
@@ -250,6 +297,20 @@ class Settings:
             warmup_request=parse_bool(
                 os.getenv("FASTKOKORO_WARMUP_REQUEST"),
                 default=DEFAULT_WARMUP_REQUEST,
+            ),
+            runtime_tail_trim_ms=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_RUNTIME_TAIL_TRIM_MS",
+                    str(DEFAULT_RUNTIME_TAIL_TRIM_MS),
+                ),
+                name="FASTKOKORO_RUNTIME_TAIL_TRIM_MS",
+            ),
+            runtime_tail_fade_ms=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_RUNTIME_TAIL_FADE_MS",
+                    str(DEFAULT_RUNTIME_TAIL_FADE_MS),
+                ),
+                name="FASTKOKORO_RUNTIME_TAIL_FADE_MS",
             ),
             profile=profile_enabled,
             profile_dir=(
@@ -394,6 +455,17 @@ def parse_optional_int(value: str | None) -> int | None:
     if value is None or value.strip() == "":
         return None
     return int(value)
+
+
+def parse_optional_positive_int(value: str | None, *, name: str) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+    parsed = int(value)
+    if parsed == 0:
+        return None
+    if parsed < 0:
+        raise ValueError(f"{name} must be zero or greater")
+    return parsed
 
 
 def parse_positive_int(value: str | None, *, name: str) -> int:

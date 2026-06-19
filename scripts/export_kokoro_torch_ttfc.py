@@ -20,15 +20,23 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         *,
         fixed_output_samples: int | None = None,
         fixed_alignment_frames: int | None = None,
+        output_samples_per_frame: int | None = None,
+        output_fade_samples: int = 0,
         static_alignment: bool = False,
         length_aware: bool = False,
+        internal_dtype: torch.dtype = torch.float32,
+        decoder_dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
         self.kmodel = kmodel
         self.fixed_output_samples = fixed_output_samples
         self.fixed_alignment_frames = fixed_alignment_frames
+        self.output_samples_per_frame = output_samples_per_frame
+        self.output_fade_samples = output_fade_samples
         self.static_alignment = static_alignment
         self.length_aware = length_aware
+        self.internal_dtype = internal_dtype
+        self.decoder_dtype = decoder_dtype
 
     def forward(
         self,
@@ -37,6 +45,8 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         speed: torch.Tensor,
         input_lengths: torch.LongTensor | None = None,
     ) -> tuple[torch.FloatTensor, torch.LongTensor]:
+        ref_s = ref_s.to(self.internal_dtype)
+        speed = speed.to(self.internal_dtype)
         if self.static_alignment:
             waveform, duration = self.forward_static_alignment(
                 input_ids,
@@ -67,7 +77,47 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         if self.fixed_output_samples is not None:
             waveform = functional.pad(waveform, (0, self.fixed_output_samples))
             waveform = waveform[..., : self.fixed_output_samples]
-        return waveform, duration
+            if self.output_samples_per_frame is not None:
+                waveform = self.mask_waveform_to_duration(waveform, duration)
+        return waveform.float(), duration
+
+    def mask_waveform_to_duration(
+        self,
+        waveform: torch.FloatTensor,
+        duration: torch.LongTensor,
+    ) -> torch.FloatTensor:
+        sample_count = waveform.shape[-1]
+        active_frames = duration.sum()
+        if self.fixed_alignment_frames is not None:
+            max_frames = torch.tensor(
+                self.fixed_alignment_frames,
+                device=waveform.device,
+                dtype=active_frames.dtype,
+            )
+            active_frames = torch.minimum(active_frames, max_frames)
+        active_samples = active_frames * self.output_samples_per_frame
+        max_samples = torch.tensor(
+            sample_count,
+            device=waveform.device,
+            dtype=active_samples.dtype,
+        )
+        active_samples = torch.minimum(active_samples, max_samples)
+        positions = torch.arange(sample_count, device=waveform.device)
+        if self.output_fade_samples <= 0:
+            return waveform * (positions < active_samples).to(waveform.dtype)
+
+        fade_start = active_samples - self.output_fade_samples
+        fade_progress = (positions - fade_start).to(waveform.dtype) / float(
+            self.output_fade_samples
+        )
+        fade_progress = torch.clamp(fade_progress, min=0.0, max=1.0)
+        gain = 0.5 * (1.0 + torch.cos(fade_progress * torch.pi))
+        gain = torch.where(
+            positions < fade_start,
+            torch.ones_like(gain),
+            gain,
+        )
+        return waveform * gain
 
     def forward_static_alignment(
         self,
@@ -104,7 +154,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         f0_pred, n_pred = self.kmodel.predictor.F0Ntrain(en, s)
         t_en = self.kmodel.text_encoder(input_ids, input_lengths, text_mask)
         asr = t_en @ pred_aln_trg
-        audio = self.kmodel.decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
+        audio = self.run_decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
         return audio, pred_dur
 
     def forward_with_lengths(
@@ -132,18 +182,33 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             torch.zeros_like(pred_dur),
             pred_dur,
         )
-        pred_aln_trg = self.build_alignment(token_count, pred_dur)
+        pred_aln_trg = self.build_alignment(token_count, pred_dur, d.dtype)
         en = d.transpose(-1, -2) @ pred_aln_trg
         f0_pred, n_pred = self.kmodel.predictor.F0Ntrain(en, s)
         t_en = self.kmodel.text_encoder(input_ids, input_lengths, text_mask)
         asr = t_en @ pred_aln_trg
-        audio = self.kmodel.decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
+        audio = self.run_decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
         return audio, pred_dur
+
+    def run_decoder(
+        self,
+        asr: torch.FloatTensor,
+        f0_pred: torch.FloatTensor,
+        n_pred: torch.FloatTensor,
+        style: torch.FloatTensor,
+    ) -> torch.FloatTensor:
+        return self.kmodel.decoder(
+            asr.to(self.decoder_dtype),
+            f0_pred.to(self.decoder_dtype),
+            n_pred.to(self.decoder_dtype),
+            style.to(self.decoder_dtype),
+        )
 
     def build_alignment(
         self,
         token_count: int,
         pred_dur: torch.LongTensor,
+        dtype: torch.dtype,
     ) -> torch.FloatTensor:
         indices = torch.repeat_interleave(
             torch.arange(token_count, device=self.kmodel.device),
@@ -155,6 +220,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             pred_aln_trg = torch.zeros(
                 (token_count, frame_count),
                 device=self.kmodel.device,
+                dtype=dtype,
             )
             pred_aln_trg[indices, frame_indices] = 1
             return pred_aln_trg.unsqueeze(0).to(self.kmodel.device)
@@ -165,6 +231,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         pred_aln_trg = torch.zeros(
             (token_count, frame_count),
             device=self.kmodel.device,
+            dtype=dtype,
         )
         pred_aln_trg[indices, frame_indices] = 1
         return pred_aln_trg.unsqueeze(0).to(self.kmodel.device)
@@ -191,6 +258,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bucket", type=int, default=24)
     parser.add_argument("--fixed-output-samples", type=int)
     parser.add_argument("--fixed-alignment-frames", type=int)
+    parser.add_argument("--output-samples-per-frame", type=int)
+    parser.add_argument("--output-fade-samples", type=int, default=0)
+    parser.add_argument(
+        "--precision",
+        default="fp32",
+        choices=(
+            "fp32",
+            "fp16",
+            "decoder-fp16",
+            "decoder-fp16-istft-fp32",
+            "decoder-fp16-post-fp32",
+            "decoder-fp16-generator-fp32",
+        ),
+        help="Internal PyTorch precision used during export.",
+    )
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument(
         "--legacy-export",
@@ -257,12 +339,46 @@ def main() -> int:
         patch_fixed_lstm_for_export(kmodel)
     if args.patch_deterministic_source:
         patch_deterministic_source_for_export(kmodel)
+    internal_dtype = torch.float16 if args.precision == "fp16" else torch.float32
+    decoder_dtype = (
+        torch.float16
+        if args.precision
+        in {
+            "fp16",
+            "decoder-fp16",
+            "decoder-fp16-istft-fp32",
+            "decoder-fp16-post-fp32",
+            "decoder-fp16-generator-fp32",
+        }
+        else torch.float32
+    )
+    if args.precision == "fp16":
+        kmodel = kmodel.half()
+        keep_source_module_float(kmodel)
+    elif args.precision in {
+        "decoder-fp16",
+        "decoder-fp16-istft-fp32",
+        "decoder-fp16-post-fp32",
+        "decoder-fp16-generator-fp32",
+    }:
+        kmodel.decoder = kmodel.decoder.half()
+        keep_source_module_float(kmodel)
+        if args.precision == "decoder-fp16-istft-fp32":
+            keep_generator_istft_float(kmodel)
+        elif args.precision == "decoder-fp16-post-fp32":
+            keep_generator_post_float(kmodel)
+        elif args.precision == "decoder-fp16-generator-fp32":
+            keep_generator_float(kmodel)
     model = KokoroTTFCExportWrapper(
         kmodel,
         fixed_output_samples=args.fixed_output_samples,
         fixed_alignment_frames=args.fixed_alignment_frames,
+        output_samples_per_frame=args.output_samples_per_frame,
+        output_fade_samples=args.output_fade_samples,
         static_alignment=args.static_alignment,
         length_aware=args.length_aware,
+        internal_dtype=internal_dtype,
+        decoder_dtype=decoder_dtype,
     ).eval()
 
     input_ids = torch.arange(args.bucket, dtype=torch.long, device=device).unsqueeze(0)
@@ -371,6 +487,101 @@ def patch_fixed_lstm_for_export(kmodel: torch.nn.Module) -> None:
         kmodel.predictor.text_encoder,
         type(kmodel.predictor.text_encoder),
     )
+
+
+def keep_source_module_float(kmodel: torch.nn.Module) -> None:
+    source = kmodel.decoder.generator.m_source
+    source.float()
+    original_forward = source.forward
+
+    def source_forward_fp32(self, x):
+        output_dtype = x.dtype
+        sine_merge, noise, uv = original_forward(x.float())
+        return (
+            sine_merge.to(output_dtype),
+            noise.to(output_dtype),
+            uv.to(output_dtype),
+        )
+
+    source.forward = source_forward_fp32.__get__(source, type(source))
+
+
+def keep_generator_post_float(kmodel: torch.nn.Module) -> None:
+    generator = kmodel.decoder.generator
+    generator.conv_post.float()
+    generator.stft.float()
+
+    def generator_forward_post_fp32(self, x, s, f0):
+        with torch.no_grad():
+            f0 = self.f0_upsamp(f0[:, None]).transpose(1, 2)
+            har_source, _noi_source, _uv = self.m_source(f0)
+            har_source = har_source.transpose(1, 2).squeeze(1)
+            har_spec, har_phase = self.stft.transform(har_source.float())
+            har = torch.cat([har_spec, har_phase], dim=1).to(x.dtype)
+        for i in range(self.num_upsamples):
+            x = torch.nn.functional.leaky_relu(x, negative_slope=0.1)
+            x_source = self.noise_convs[i](har)
+            x_source = self.noise_res[i](x_source, s)
+            x = self.ups[i](x)
+            if i == self.num_upsamples - 1:
+                x = self.reflection_pad(x)
+            x = x + x_source
+            xs = None
+            for j in range(self.num_kernels):
+                block_output = self.resblocks[i * self.num_kernels + j](x, s)
+                xs = block_output if xs is None else xs + block_output
+            x = xs / self.num_kernels
+        x = torch.nn.functional.leaky_relu(x).float()
+        x = self.conv_post(x)
+        spec = torch.exp(x[:, : self.post_n_fft // 2 + 1, :])
+        phase = torch.sin(x[:, self.post_n_fft // 2 + 1 :, :])
+        return self.stft.inverse(spec, phase)
+
+    generator.forward = generator_forward_post_fp32.__get__(generator, type(generator))
+
+
+def keep_generator_istft_float(kmodel: torch.nn.Module) -> None:
+    generator = kmodel.decoder.generator
+    generator.stft.float()
+
+    def generator_forward_istft_fp32(self, x, s, f0):
+        with torch.no_grad():
+            f0 = self.f0_upsamp(f0[:, None]).transpose(1, 2)
+            har_source, _noi_source, _uv = self.m_source(f0)
+            har_source = har_source.transpose(1, 2).squeeze(1)
+            har_spec, har_phase = self.stft.transform(har_source.float())
+            har = torch.cat([har_spec, har_phase], dim=1).to(x.dtype)
+        for i in range(self.num_upsamples):
+            x = torch.nn.functional.leaky_relu(x, negative_slope=0.1)
+            x_source = self.noise_convs[i](har)
+            x_source = self.noise_res[i](x_source, s)
+            x = self.ups[i](x)
+            if i == self.num_upsamples - 1:
+                x = self.reflection_pad(x)
+            x = x + x_source
+            xs = None
+            for j in range(self.num_kernels):
+                block_output = self.resblocks[i * self.num_kernels + j](x, s)
+                xs = block_output if xs is None else xs + block_output
+            x = xs / self.num_kernels
+        x = torch.nn.functional.leaky_relu(x)
+        x = self.conv_post(x).float()
+        spec = torch.exp(x[:, : self.post_n_fft // 2 + 1, :])
+        phase = torch.sin(x[:, self.post_n_fft // 2 + 1 :, :])
+        return self.stft.inverse(spec, phase)
+
+    generator.forward = generator_forward_istft_fp32.__get__(generator, type(generator))
+
+
+def keep_generator_float(kmodel: torch.nn.Module) -> None:
+    generator = kmodel.decoder.generator
+    generator.float()
+    original_forward = generator.forward
+
+    def generator_forward_fp32(self, x, s, f0):
+        return original_forward(x.float(), s.float(), f0.float())
+
+    generator.forward = generator_forward_fp32.__get__(generator, type(generator))
 
 
 def patch_deterministic_source_for_export(kmodel: torch.nn.Module) -> None:
