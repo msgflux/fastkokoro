@@ -8,6 +8,7 @@ from pathlib import Path
 
 import onnx
 import torch
+import torch.nn.functional as functional
 
 BLOCKED_TTFC_OPS = {"NonZero", "ScatterND", "STFT", "Range"}
 
@@ -18,21 +19,45 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         kmodel: torch.nn.Module,
         *,
         fixed_output_samples: int | None = None,
+        fixed_alignment_frames: int | None = None,
         static_alignment: bool = False,
+        length_aware: bool = False,
     ) -> None:
         super().__init__()
         self.kmodel = kmodel
         self.fixed_output_samples = fixed_output_samples
+        self.fixed_alignment_frames = fixed_alignment_frames
         self.static_alignment = static_alignment
+        self.length_aware = length_aware
 
     def forward(
         self,
         input_ids: torch.LongTensor,
         ref_s: torch.FloatTensor,
         speed: torch.Tensor,
+        input_lengths: torch.LongTensor | None = None,
     ) -> tuple[torch.FloatTensor, torch.LongTensor]:
         if self.static_alignment:
-            waveform, duration = self.forward_static_alignment(input_ids, ref_s, speed)
+            waveform, duration = self.forward_static_alignment(
+                input_ids,
+                ref_s,
+                speed,
+                input_lengths,
+            )
+        elif self.length_aware:
+            if input_lengths is None:
+                input_lengths = torch.full(
+                    (input_ids.shape[0],),
+                    input_ids.shape[-1],
+                    device=input_ids.device,
+                    dtype=torch.long,
+                )
+            waveform, duration = self.forward_with_lengths(
+                input_ids,
+                ref_s,
+                speed,
+                input_lengths,
+            )
         else:
             waveform, duration = self.kmodel.forward_with_tokens(
                 input_ids,
@@ -40,6 +65,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
                 speed,
             )
         if self.fixed_output_samples is not None:
+            waveform = functional.pad(waveform, (0, self.fixed_output_samples))
             waveform = waveform[..., : self.fixed_output_samples]
         return waveform, duration
 
@@ -48,23 +74,27 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         input_ids: torch.LongTensor,
         ref_s: torch.FloatTensor,
         speed: torch.Tensor,
+        input_lengths: torch.LongTensor | None = None,
     ) -> tuple[torch.FloatTensor, torch.LongTensor]:
         del speed
         batch_size, token_count = input_ids.shape
-        input_lengths = torch.full(
-            (batch_size,),
-            token_count,
-            device=input_ids.device,
-            dtype=torch.long,
-        )
+        if input_lengths is None:
+            input_lengths = torch.full(
+                (batch_size,),
+                token_count,
+                device=input_ids.device,
+                dtype=torch.long,
+            )
         positions = torch.arange(token_count, device=input_ids.device)
-        text_mask = positions.unsqueeze(0).expand(batch_size, -1) >= token_count
+        text_mask = positions.unsqueeze(0).expand(batch_size, -1) >= (
+            input_lengths.unsqueeze(1)
+        )
 
         bert_dur = self.kmodel.bert(input_ids, attention_mask=(~text_mask).int())
         d_en = self.kmodel.bert_encoder(bert_dur).transpose(-1, -2)
         s = ref_s[:, 128:]
         d = self.kmodel.predictor.text_encoder(d_en, s, input_lengths, text_mask)
-        pred_dur = torch.ones(token_count, device=input_ids.device, dtype=torch.long)
+        pred_dur = (~text_mask).long().squeeze(0)
         pred_aln_trg = torch.eye(
             token_count,
             device=input_ids.device,
@@ -76,6 +106,68 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         asr = t_en @ pred_aln_trg
         audio = self.kmodel.decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
         return audio, pred_dur
+
+    def forward_with_lengths(
+        self,
+        input_ids: torch.LongTensor,
+        ref_s: torch.FloatTensor,
+        speed: torch.Tensor,
+        input_lengths: torch.LongTensor,
+    ) -> tuple[torch.FloatTensor, torch.LongTensor]:
+        batch_size, token_count = input_ids.shape
+        positions = torch.arange(token_count, device=input_ids.device)
+        text_mask = positions.unsqueeze(0).expand(batch_size, -1) >= (
+            input_lengths.unsqueeze(1)
+        )
+        bert_dur = self.kmodel.bert(input_ids, attention_mask=(~text_mask).int())
+        d_en = self.kmodel.bert_encoder(bert_dur).transpose(-1, -2)
+        s = ref_s[:, 128:]
+        d = self.kmodel.predictor.text_encoder(d_en, s, input_lengths, text_mask)
+        x, _ = self.kmodel.predictor.lstm(d)
+        duration = self.kmodel.predictor.duration_proj(x)
+        duration = torch.sigmoid(duration).sum(axis=-1) / speed
+        pred_dur = torch.round(duration).clamp(min=1).long().squeeze()
+        pred_dur = torch.where(
+            text_mask.squeeze(0),
+            torch.zeros_like(pred_dur),
+            pred_dur,
+        )
+        pred_aln_trg = self.build_alignment(token_count, pred_dur)
+        en = d.transpose(-1, -2) @ pred_aln_trg
+        f0_pred, n_pred = self.kmodel.predictor.F0Ntrain(en, s)
+        t_en = self.kmodel.text_encoder(input_ids, input_lengths, text_mask)
+        asr = t_en @ pred_aln_trg
+        audio = self.kmodel.decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
+        return audio, pred_dur
+
+    def build_alignment(
+        self,
+        token_count: int,
+        pred_dur: torch.LongTensor,
+    ) -> torch.FloatTensor:
+        indices = torch.repeat_interleave(
+            torch.arange(token_count, device=self.kmodel.device),
+            pred_dur,
+        )
+        if self.fixed_alignment_frames is None:
+            frame_count = indices.shape[0]
+            frame_indices = torch.arange(frame_count, device=self.kmodel.device)
+            pred_aln_trg = torch.zeros(
+                (token_count, frame_count),
+                device=self.kmodel.device,
+            )
+            pred_aln_trg[indices, frame_indices] = 1
+            return pred_aln_trg.unsqueeze(0).to(self.kmodel.device)
+
+        frame_count = self.fixed_alignment_frames
+        indices = indices[:frame_count]
+        frame_indices = torch.arange(indices.shape[0], device=self.kmodel.device)
+        pred_aln_trg = torch.zeros(
+            (token_count, frame_count),
+            device=self.kmodel.device,
+        )
+        pred_aln_trg[indices, frame_indices] = 1
+        return pred_aln_trg.unsqueeze(0).to(self.kmodel.device)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--bucket", type=int, default=24)
     parser.add_argument("--fixed-output-samples", type=int)
+    parser.add_argument("--fixed-alignment-frames", type=int)
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument(
         "--legacy-export",
@@ -108,6 +201,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--static-alignment",
         action="store_true",
         help="Bypass dynamic duration alignment with one frame per token.",
+    )
+    parser.add_argument(
+        "--length-aware",
+        action="store_true",
+        help=(
+            "Export input_lengths and mask padded bucket slots from "
+            "duration/alignment."
+        ),
     )
     parser.add_argument(
         "--patch-fixed-lstm",
@@ -159,27 +260,40 @@ def main() -> int:
     model = KokoroTTFCExportWrapper(
         kmodel,
         fixed_output_samples=args.fixed_output_samples,
+        fixed_alignment_frames=args.fixed_alignment_frames,
         static_alignment=args.static_alignment,
+        length_aware=args.length_aware,
     ).eval()
 
     input_ids = torch.arange(args.bucket, dtype=torch.long, device=device).unsqueeze(0)
     input_ids[:, 0] = 0
     input_ids[:, -1] = 0
+    input_lengths = torch.full((1,), args.bucket, dtype=torch.long, device=device)
     ref_s = torch.randn(1, 256, dtype=torch.float32, device=device)
     speed = torch.ones(1, dtype=torch.float32, device=device)
+    export_args = (
+        (input_ids, ref_s, speed, input_lengths)
+        if args.length_aware or args.static_alignment
+        else (input_ids, ref_s, speed)
+    )
+    input_names = (
+        ["input_ids", "style", "speed", "input_lengths"]
+        if args.length_aware or args.static_alignment
+        else ["input_ids", "style", "speed"]
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
-        waveform, duration = model(input_ids, ref_s, speed)
+        waveform, duration = model(*export_args)
     print(f"torch_waveform_shape={tuple(waveform.shape)}")
     print(f"torch_duration_shape={tuple(duration.shape)}")
 
     torch.onnx.export(
         model,
-        args=(input_ids, ref_s, speed),
+        args=export_args,
         f=str(args.output),
         export_params=True,
-        input_names=["input_ids", "style", "speed"],
+        input_names=input_names,
         output_names=["waveform", "duration"],
         opset_version=args.opset,
         do_constant_folding=True,
