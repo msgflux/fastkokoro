@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 
 import onnx
-from onnxsim import simplify
 
 from fastkokoro.config import Settings
 
@@ -49,6 +48,8 @@ def resolve_cpu_simplified_model_path(
 
 
 def simplify_onnx_model(model_path: Path, output_path: Path) -> Path:
+    from onnxsim import simplify
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(
         "Simplifying ONNX model for CPU: input=%s output=%s",

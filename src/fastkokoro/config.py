@@ -5,9 +5,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_MODEL_REPO = "nvidia/kokoro-82M-onnx-opt"
-DEFAULT_MODEL_FILE = "kokoro-82m-v1.0.onnx"
-DEFAULT_VOICES_FILE = "voices.bin"
+DEFAULT_MODEL_REPO = "msgflux/Kokoro-82M-streaming-onnx"
+DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b24-fp16.onnx"
+DEFAULT_VOICES_FILE = "voices.npz"
 DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
 DEFAULT_LANG = "en-us"
@@ -26,7 +26,6 @@ DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
 DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_ONNX_ADAIN_FUSION = False
 DEFAULT_ONNX_CONV_ADAIN_FUSION = False
-DEFAULT_WARMUP_MULTI_SHAPE = False
 DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
 DEFAULT_ONNX_TTFC_ATTENTION_MASK_BUCKET = None
 DEFAULT_ONNX_TTFC_MODEL_PATH = None
@@ -256,15 +255,8 @@ class Settings:
                 if conv_adain_custom_op_library
                 else None
             ),
-            warmup_multi_shape=parse_bool(
-                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE"),
-                default=DEFAULT_WARMUP_MULTI_SHAPE,
-            ),
-            onnx_ttfc_shape_buckets=parse_int_csv(
-                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS"),
-                name="FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS",
-            )
-            or DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
+            warmup_multi_shape=False,
+            onnx_ttfc_shape_buckets=DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
             onnx_ttfc_attention_mask_bucket=parse_optional_positive_int(
                 os.getenv(
                     "FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET",

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import onnx
+
+from fastkokoro.config import Settings
 
 
 @dataclass(frozen=True)
@@ -182,6 +185,28 @@ EXPERIMENTAL_VARIANTS = (
 )
 
 
+def resolve_ttfc_attention_mask_model_path(
+    model_path: Path,
+    settings: Settings,
+) -> Path:
+    bucket = settings.onnx_ttfc_attention_mask_bucket
+    if bucket is None:
+        return model_path
+    if bucket <= 2:
+        raise ValueError("FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET must be > 2")
+
+    output_path = _ttfc_attention_mask_model_path(model_path, settings, bucket)
+    if output_path.exists():
+        return output_path
+
+    return write_fixed_shape_variant(
+        model_path,
+        output_path,
+        fixed_input_bucket=bucket,
+        bert_attention_mask=True,
+    )
+
+
 def write_fixed_shape_variant(
     model_path: Path,
     output_path: Path,
@@ -243,6 +268,19 @@ def write_fixed_shape_variant(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     onnx.save(model, output_path)
     return output_path
+
+
+def _ttfc_attention_mask_model_path(
+    model_path: Path,
+    settings: Settings,
+    bucket: int,
+) -> Path:
+    stat = model_path.stat()
+    digest = hashlib.sha256(
+        f"{model_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:b{bucket}".encode()
+    ).hexdigest()[:12]
+    stem = model_path.name.removesuffix(".onnx")
+    return settings.cache_dir / "onnx" / f"{stem}.ttfc-attn-b{bucket}.{digest}.onnx"
 
 
 def apply_fixed_input_with_attention_mask(
@@ -320,7 +358,7 @@ def apply_fixed_input_with_attention_mask(
             name="FastKokoroAttentionMaskWhere",
         ),
     ]
-    for node in replacement_nodes:
+    for node in reversed(replacement_nodes):
         _replace_or_append_node(model, node)
 
     old_bias_name = "/encoder/bert/Where_2_output_0"
@@ -571,10 +609,6 @@ def apply_decoder_entry_annotations(model: onnx.ModelProto) -> None:
 
 def apply_decoder_entry_value_annotations(model: onnx.ModelProto) -> None:
     annotations = {
-        "/encoder/MatMul_1_output_0": [1, 512, 1],
-        "/encoder/MatMul_output_0": [1, 640, 1],
-        "/encoder/Transpose_1_output_0": [1, 1, 640],
-        "/decoder/decoder/asr_res/asr_res.0/Conv_output_0": [1, 64, 1],
         "/encoder/predictor/lstm/ConstantOfShape_output_0": [2, 1, 256],
         "/encoder/shared/ConstantOfShape_output_0": [2, 1, 256],
     }
@@ -690,7 +724,8 @@ def apply_static_batch_annotations(
             continue
         dims[0].ClearField("dim_param")
         dims[0].dim_value = 1
-    return inferred
+        _upsert_value_info(model, value)
+    return model
 
 
 def apply_fixed_text_encoder_lstm_reshapes(

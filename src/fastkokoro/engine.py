@@ -151,7 +151,6 @@ class FastKokoro:
         self._onnx_input_buffers = threading.local()
         self._output_buffers = threading.local()
         self._phonemize_cache: dict[tuple[str, str], str] = {}
-        self._warm_ttfc_shape_buckets()
         self._warm_ttfc_session()
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "

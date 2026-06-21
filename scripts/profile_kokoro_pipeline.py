@@ -9,16 +9,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from fastkokoro.engine import FastKokoro
-
-TEXTS = {
-    "tiny": "Ola.",
-    "short": "Ola, tudo bem?",
-    "medium_first": "Ola, tudo bem?",
-    "medium": (
-        "Ola, tudo bem? Este e um teste de sintese de voz em portugues brasileiro. "
-        "Estamos medindo a latencia ate o primeiro chunk e o tempo total de geracao."
-    ),
-}
+from scripts.benchmark_corpus import corpus_choices, get_text
 
 
 @dataclass(frozen=True)
@@ -57,7 +48,7 @@ class ProfileSummary:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--text", choices=TEXTS, default="short")
+    parser.add_argument("--text", choices=corpus_choices(), default="short")
     parser.add_argument("--voice", default="pf_dora")
     parser.add_argument("--lang", default="p")
     parser.add_argument("--speed", type=float, default=1.0)
@@ -70,7 +61,7 @@ def main() -> None:
     if args.warmup:
         engine.warmup()
 
-    text = TEXTS[args.text]
+    text = get_text(args.text, 0)
     runs = [
         profile_once(engine, text, args.text, args.voice, args.lang, args.speed)
         for _ in range(args.iterations)

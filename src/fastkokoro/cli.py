@@ -55,16 +55,6 @@ def main() -> None:
         action="store_true",
         help="Build --build-conv-custom-op without OpenMP.",
     )
-    parser.add_argument(
-        "--warmup-multi-shape",
-        action="store_true",
-        help="Enable experimental multi-shape warmup for lower first chunk latency.",
-    )
-    parser.add_argument(
-        "--warmup-multi-shape-buckets",
-        default=None,
-        help="Comma-separated shape buckets to use with --warmup-multi-shape.",
-    )
     args = parser.parse_args()
 
     if args.build_custom_op and args.build_conv_custom_op:
@@ -93,13 +83,6 @@ def main() -> None:
             custom_op_library
         )
         os.environ.setdefault("FASTKOKORO_ONNX_PROVIDERS", "CPUExecutionProvider")
-
-    if args.warmup_multi_shape or args.warmup_multi_shape_buckets:
-        os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE"] = "true"
-        if args.warmup_multi_shape_buckets:
-            os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS"] = (
-                args.warmup_multi_shape_buckets
-            )
 
     settings = Settings.from_env()
     uvicorn.run(

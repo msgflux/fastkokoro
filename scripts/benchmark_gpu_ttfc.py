@@ -22,21 +22,7 @@ from statistics import fmean, median
 
 from fastkokoro.engine import FastKokoro
 from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
-
-TEXTS = {
-    "tiny": "Hello.",
-    "short": "Hello, how are you?",
-    "medium": (
-        "Hello, how are you? This is a test of speech synthesis. We are "
-        "measuring latency to first chunk and total generation time."
-    ),
-    "long": (
-        "Hello, how are you? This is a test of speech synthesis. We are "
-        "measuring latency to first chunk and total generation time. For "
-        "streaming in a terminal interface, the ideal is to deliver audio early, "
-        "without waiting for the entire text to be processed."
-    ),
-}
+from scripts.benchmark_corpus import corpus_choices, get_text
 
 
 @dataclass
@@ -137,7 +123,7 @@ async def main():
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--lang", default="en-us")
     parser.add_argument("--speed", type=float, default=1.0)
-    parser.add_argument("--text", choices=list(TEXTS.keys()), default="short")
+    parser.add_argument("--text", choices=corpus_choices(), default="short")
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--frame-ms", type=int, default=200)
     parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True)
@@ -149,12 +135,16 @@ async def main():
     if args.warmup:
         engine.warmup()
 
-    text = TEXTS[args.text]
     label = f"{args.frame_ms}ms_pcm"
 
     print(flush=True)
     print(f"Active providers: {providers}", flush=True)
-    print(f"Text: [{args.text}] chars={len(text)}", flush=True)
+    first_text = get_text(args.text, 0)
+    print(
+        f"Text corpus: [{args.text}] variants rotating, "
+        f"first chars={len(first_text)}",
+        flush=True,
+    )
     print(f"Voice={args.voice} Lang={args.lang} Speed={args.speed}", flush=True)
     print(f"Iterations={args.iterations} Frame={args.frame_ms}ms", flush=True)
     print(flush=True)
@@ -164,6 +154,7 @@ async def main():
     for strategy in ["sentence", "adaptive", "phrase", "chunk"]:
         print(f"===== {strategy.upper()} =====", flush=True)
         for i in range(args.iterations):
+            text = get_text(args.text, i)
             stream = make_stream(
                 engine,
                 strategy,

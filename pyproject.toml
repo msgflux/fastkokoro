@@ -40,6 +40,7 @@ gpu-legacy = [
 fastkokoro = "fastkokoro.cli:main"
 fastkokoro-build-adain-op = "fastkokoro.build_adain_op:main"
 fastkokoro-build-conv-adain-op = "fastkokoro.build_conv_adain_op:main"
+fastkokoro-build-cuda-adain-op = "fastkokoro.build_cuda_adain_op:main"
 fastkokoro-inspect-fixed-shapes = "fastkokoro.inspect_fixed_shapes:main"
 
 [dependency-groups]

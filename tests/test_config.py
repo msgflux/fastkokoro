@@ -15,7 +15,6 @@ from fastkokoro.config import (
     DEFAULT_PROFILE,
     DEFAULT_RUNTIME_TAIL_FADE_MS,
     DEFAULT_RUNTIME_TAIL_TRIM_MS,
-    DEFAULT_WARMUP_MULTI_SHAPE,
     DEFAULT_WARMUP_TEXT,
     Settings,
 )
@@ -58,8 +57,6 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS", "10")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS", "56")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS", "4")
-    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE", "true")
-    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,6,8,16")
     monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET", "12")
     monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH", "/tmp/ttfc.onnx")
     monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_WARM_SESSION", "true")
@@ -108,8 +105,8 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.stream_schedule_max_segment_words == 10
     assert settings.stream_cpu_schedule_max_segment_chars == 56
     assert settings.stream_cpu_schedule_max_segment_words == 4
-    assert settings.warmup_multi_shape is True
-    assert settings.onnx_ttfc_shape_buckets == (6, 8, 16)
+    assert settings.warmup_multi_shape is False
+    assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
     assert settings.onnx_ttfc_attention_mask_bucket == 12
     assert str(settings.onnx_ttfc_model_path) == "/tmp/ttfc.onnx"
     assert settings.onnx_ttfc_warm_session is True
@@ -136,8 +133,6 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_WARM_SESSION", raising=False)
@@ -165,7 +160,10 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_conv_adain_fusion == DEFAULT_ONNX_CONV_ADAIN_FUSION
     assert settings.onnx_conv_adain_model_path is None
     assert settings.onnx_conv_adain_custom_op_library is None
-    assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
+    assert settings.model_repo == "msgflux/Kokoro-82M-streaming-onnx"
+    assert settings.model_file == "onnx/kokoro-82m-streaming-b24-fp16.onnx"
+    assert settings.voices_file == "voices.npz"
+    assert settings.warmup_multi_shape is False
     assert settings.warmup_text == DEFAULT_WARMUP_TEXT
     assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
     assert (
@@ -288,17 +286,6 @@ def test_settings_rejects_invalid_weight_only_nbits(monkeypatch):
         assert "FASTKOKORO_ONNX_WEIGHT_ONLY_NBITS" in str(exc)
     else:
         raise AssertionError("expected invalid weight-only nbits to fail")
-
-
-def test_settings_rejects_invalid_ttfc_shape_buckets(monkeypatch):
-    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,0,16")
-
-    try:
-        Settings.from_env()
-    except ValueError as exc:
-        assert "FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS" in str(exc)
-    else:
-        raise AssertionError("expected invalid ttfc shape buckets to fail")
 
 
 def test_settings_parses_cors(monkeypatch):

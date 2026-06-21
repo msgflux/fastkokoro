@@ -15,15 +15,7 @@ from fastkokoro.streaming import (
     split_scheduled_chunks,
     split_sentences,
 )
-
-TEXTS = {
-    "tiny": "Ola.",
-    "short": "Ola, tudo bem?",
-    "medium": (
-        "Ola, tudo bem? Este e um teste de sintese de voz em portugues brasileiro. "
-        "Estamos medindo a latencia ate o primeiro chunk e o tempo total de geracao."
-    ),
-}
+from scripts.benchmark_corpus import corpus_choices, get_text
 
 
 @dataclass(frozen=True)
@@ -83,7 +75,7 @@ def main() -> None:
     parser.add_argument("--voice", default="pf_dora")
     parser.add_argument("--lang", default="p")
     parser.add_argument("--speed", type=float, default=1.0)
-    parser.add_argument("--text", choices=TEXTS, default="short")
+    parser.add_argument("--text", choices=corpus_choices(), default="short")
     parser.add_argument(
         "--strategy",
         choices=("chunk", "phrase", "sentence"),
@@ -101,14 +93,14 @@ def main() -> None:
     runs = [
         profile_once(
             engine,
-            TEXTS[args.text],
+            get_text(args.text, iteration),
             text_name=args.text,
             strategy=args.strategy,
             voice_name=args.voice,
             lang=args.lang,
             speed=args.speed,
         )
-        for _ in range(args.iterations)
+        for iteration in range(args.iterations)
     ]
     if args.json_lines:
         for run in runs:

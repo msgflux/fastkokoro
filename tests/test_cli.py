@@ -79,35 +79,3 @@ def test_cli_build_conv_custom_op_sets_conv_adain_environment(monkeypatch, tmp_p
     build.assert_called_once_with(output=output, cc="gcc", openmp=True)
     run.assert_called_once()
 
-
-def test_cli_warmup_multi_shape_sets_environment(monkeypatch):
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
-
-    with (
-        patch.dict(cli.os.environ, {}, clear=False),
-        patch("sys.argv", ["fastkokoro", "--warmup-multi-shape"]),
-        patch("fastkokoro.cli.uvicorn.run") as run,
-    ):
-        cli.main()
-        assert cli.os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE"] == "true"
-
-    run.assert_called_once()
-
-
-def test_cli_warmup_multi_shape_buckets_sets_environment(monkeypatch):
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
-
-    with (
-        patch.dict(cli.os.environ, {}, clear=False),
-        patch(
-            "sys.argv",
-            ["fastkokoro", "--warmup-multi-shape-buckets", "6,8,16"],
-        ),
-        patch("fastkokoro.cli.uvicorn.run") as run,
-    ):
-        cli.main()
-        assert cli.os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE"] == "true"
-        assert cli.os.environ["FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS"] == "6,8,16"
-
-    run.assert_called_once()

@@ -30,34 +30,6 @@ def iter_warmup_request_texts(settings: Settings) -> Iterator[str]:
 
     yield from emit(settings.warmup_text)
 
-    if not settings.warmup_multi_shape:
-        return
-
-    phrase_bank = (
-        "Hello there, thanks for waiting.",
-        "This startup warmup is exercising the streaming path.",
-        "We are checking punctuation, pauses, and chunk boundaries.",
-        "Short clauses, longer clauses, and mixed cadence all matter here.",
-        "The goal is to reduce first chunk latency for real user requests.",
-        "Please confirm the generated audio starts quickly and stays stable.",
-        "Numbers like twenty four, forty eight, and ninety six can change segmentation.",
-        "Questions, commas, and transitions should keep the first response warm.",
-    )
-
-    for bucket_index, bucket in enumerate(settings.onnx_ttfc_shape_buckets):
-        target_words = max(3, min(bucket, settings.stream_schedule_max_segment_words))
-        parts = [f"Warmup bucket {bucket}."]
-        words = len(parts[0].split())
-        index = bucket_index
-        while words < target_words or len(" ".join(parts)) < bucket * 4:
-            phrase = phrase_bank[index % len(phrase_bank)]
-            parts.append(phrase)
-            words += len(phrase.split())
-            index += 1
-            if len(parts) > len(phrase_bank) + 1:
-                break
-        yield from emit(" ".join(parts))
-
 
 def create_app(
     engine: FastKokoro | None = None,

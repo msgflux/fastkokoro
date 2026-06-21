@@ -72,10 +72,19 @@ def settings(**overrides):
         onnx_conv_adain_custom_op_library=None,
         warmup_multi_shape=False,
         onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        onnx_ttfc_attention_mask_bucket=None,
+        onnx_ttfc_model_path=None,
+        onnx_ttfc_warm_session=False,
+        onnx_ttfc_warm_texts=("Hello.", "Good morning."),
+        onnx_ttfc_warm_token_counts=(1, 2, 3),
         jit=False,
         warmup=False,
-        warmup_text="Hello there. This is a warmup request for streaming speech generation.",
+        warmup_text=(
+            "Hello there. This is a warmup request for streaming speech generation."
+        ),
         warmup_request=False,
+        runtime_tail_trim_ms=150,
+        runtime_tail_fade_ms=72,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,
@@ -356,7 +365,9 @@ def test_startup_warmup_request_consumes_first_stream_chunk():
 
     assert len(engine.stream_calls) == 1
     text, kwargs = engine.stream_calls[0]
-    assert text == "Hello there. This is a warmup request for streaming speech generation."
+    assert (
+        text == "Hello there. This is a warmup request for streaming speech generation."
+    )
     assert kwargs["voice"] == "af_heart"
     assert kwargs["response_format"] == "pcm"
     assert kwargs["lang"] == "en-us"
@@ -372,32 +383,27 @@ def test_startup_warmup_request_does_not_record_speech_metrics():
     assert metrics["speech"]["requests"] == 0
 
 
-def test_iter_warmup_request_texts_uses_multi_shape_and_deduplicates():
+def test_iter_warmup_request_texts_returns_configured_text_once():
     texts = list(
         iter_warmup_request_texts(
             settings(
-                warmup_multi_shape=True,
-                onnx_ttfc_shape_buckets=(6, 8, 16),
                 warmup_text="Custom warmup sentence.",
             )
         )
     )
 
-    assert texts[0] == "Custom warmup sentence."
-    assert len(texts) == 4
-    assert len(set(texts)) == len(texts)
-    assert all(len(text.split()) >= 3 for text in texts[1:])
+    assert texts == ["Custom warmup sentence."]
 
 
-def test_startup_warmup_request_uses_multi_shape_texts():
+def test_startup_warmup_request_uses_single_configured_text():
     engine = FakeEngine()
     engine.settings = settings(
         warmup_request=True,
-        warmup_multi_shape=True,
-        onnx_ttfc_shape_buckets=(6, 8),
+        warmup_text="Custom warmup sentence.",
     )
 
     with TestClient(create_app(engine, engine.settings)):
         pass
 
-    assert len(engine.stream_calls) == 3
+    assert len(engine.stream_calls) == 1
+    assert engine.stream_calls[0][0] == "Custom warmup sentence."

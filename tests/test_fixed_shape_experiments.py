@@ -1,3 +1,4 @@
+import onnx
 from onnx import TensorProto, helper
 
 from fastkokoro.fixed_shape_experiments import (
@@ -17,6 +18,7 @@ from fastkokoro.fixed_shape_experiments import (
     apply_fixed_token_slice,
     apply_graph_static_batch_annotations,
     apply_output_pad,
+    resolve_ttfc_attention_mask_model_path,
 )
 
 
@@ -117,6 +119,44 @@ def test_apply_fixed_input_with_attention_mask_adds_mask_input_and_bias():
         == "/encoder/bert/encoder/albert_layer_groups.0/albert_layers.0/attention/Add"
     ]
     assert consumers[0].input[1] == "fastkokoro_attention_mask_bias"
+
+
+def test_resolve_ttfc_attention_mask_model_path_can_be_disabled(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    model = _model()
+
+    onnx.save(model, model_path)
+    settings = type(
+        "Settings",
+        (),
+        {
+            "onnx_ttfc_attention_mask_bucket": None,
+            "cache_dir": tmp_path,
+        },
+    )()
+
+    assert resolve_ttfc_attention_mask_model_path(model_path, settings) == model_path
+
+
+def test_resolve_ttfc_attention_mask_model_path_generates_cached_variant(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    onnx.save(_model(), model_path)
+    settings = type(
+        "Settings",
+        (),
+        {
+            "onnx_ttfc_attention_mask_bucket": 10,
+            "cache_dir": tmp_path,
+        },
+    )()
+
+    result = resolve_ttfc_attention_mask_model_path(model_path, settings)
+
+    assert result != model_path
+    assert result.exists()
+    inputs = {value.name: value for value in onnx.load(result).graph.input}
+    assert _shape(inputs["tokens"]) == [1, 10]
+    assert _shape(inputs["attention_mask"]) == [1, 10]
 
 
 def test_apply_fixed_bert_embedding_indices_rewires_gather_inputs():
@@ -436,11 +476,6 @@ def test_apply_decoder_entry_value_annotations_replaces_existing_value_info():
     model.graph.value_info.extend(
         [
             helper.make_tensor_value_info(
-                "/encoder/MatMul_1_output_0",
-                TensorProto.FLOAT,
-                ["batch", 512, "time"],
-            ),
-            helper.make_tensor_value_info(
                 "/encoder/shared/ConstantOfShape_output_0",
                 TensorProto.FLOAT,
                 ["directions", "batch", "hidden"],
@@ -451,12 +486,12 @@ def test_apply_decoder_entry_value_annotations_replaces_existing_value_info():
     apply_decoder_entry_value_annotations(model)
 
     values = {value.name: value for value in model.graph.value_info}
-    assert _shape(values["/encoder/MatMul_1_output_0"]) == [1, 512, 1]
     assert _shape(values["/encoder/shared/ConstantOfShape_output_0"]) == [
         2,
         1,
         256,
     ]
+    assert "/encoder/MatMul_1_output_0" not in values
 
 
 def test_apply_decoder_generator_prestft_annotations_adds_fixed_shapes():

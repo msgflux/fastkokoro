@@ -6,11 +6,11 @@ Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
 overhead, fast local inference, and a small dependency footprint. It supports CPU
 and GPU execution through ONNX Runtime providers, including CUDA, TensorRT, and
 other providers when the matching runtime package is installed. The default
-model is NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
+model is the fixed-bucket streaming export:
+`msgflux/Kokoro-82M-streaming-onnx`.
 
-The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
-once into the internal `.npz` voice format used by `fastkokoro`, so the default model
-and voices both come from `nvidia/kokoro-82M-onnx-opt`.
+The default checkpoint is `onnx/kokoro-82m-streaming-b24-fp16.onnx`, paired with
+the ready-to-use `voices.npz` file from the same Hugging Face repository.
 
 ## Demo
 
@@ -70,18 +70,6 @@ Run the server from source:
 
 ```bash
 uv run fastkokoro
-```
-
-Enable experimental TTFC multi-shape warmup from CLI:
-
-```bash
-uv run fastkokoro --warmup-multi-shape
-```
-
-Or provide custom buckets:
-
-```bash
-uv run fastkokoro --warmup-multi-shape-buckets 6,8,9,10,11,12,16,24
 ```
 
 For GPU development environments, use the GPU extra instead:
@@ -147,12 +135,12 @@ Environment variables:
 | --- | --- |
 | `FASTKOKORO_HOST` | `0.0.0.0` |
 | `FASTKOKORO_PORT` | `8880` |
-| `FASTKOKORO_MODEL_REPO` | `nvidia/kokoro-82M-onnx-opt` |
-| `FASTKOKORO_MODEL_FILE` | `kokoro-82m-v1.0.onnx` |
+| `FASTKOKORO_MODEL_REPO` | `msgflux/Kokoro-82M-streaming-onnx` |
+| `FASTKOKORO_MODEL_FILE` | `onnx/kokoro-82m-streaming-b24-fp16.onnx` |
 | `FASTKOKORO_MODEL_PATH` | unset; downloads from Hugging Face |
-| `FASTKOKORO_VOICES_FILE` | `voices.bin` |
+| `FASTKOKORO_VOICES_FILE` | `voices.npz` |
 | `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
-| `FASTKOKORO_VOICES_PATH` | unset; downloads and converts NVIDIA voices |
+| `FASTKOKORO_VOICES_PATH` | unset; downloads from Hugging Face |
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
@@ -175,8 +163,6 @@ Environment variables:
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE` | `128` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL` | `4` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
-| `FASTKOKORO_WARMUP_MULTI_SHAPE` | `false` |
-| `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` | `6,8,9,10,11,12,16,24` |
 | `FASTKOKORO_JIT` | `true` |
 | `FASTKOKORO_PROFILE` | `false` |
 | `FASTKOKORO_PROFILE_DIR` | `FASTKOKORO_CACHE_DIR/profiles` |
@@ -198,16 +184,17 @@ server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
-the same streaming speech endpoint flow and consume the first chunk. When
-`FASTKOKORO_WARMUP_MULTI_SHAPE=true`, the startup request warmup also runs a
-small multi-shape battery of richer phrases instead of only a trivial short
-utterance. This is useful when the remaining TTFC cost lives in the first real
-request path rather than in engine-only warmup.
+the same streaming speech endpoint flow and consume the first chunk.
 
-Set `FASTKOKORO_WARMUP_MULTI_SHAPE=true` to enable experimental multi-shape ONNX
-warmup focused on first chunk latency. The server runs one pass per bucket from
-`FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` without changing request shapes at
-runtime.
+The default b24 streaming model is optimized for low TTFC. To choose a different
+fixed bucket, set `FASTKOKORO_MODEL_FILE` to one of the other published ONNX
+files:
+
+```bash
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b16-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b32-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b48-fp16.onnx
+```
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
@@ -231,9 +218,10 @@ back into a dynamic tensor inside the graph.
 
 `FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
 possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
-`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default is intentionally small, up to
-2 words or 32 characters per model call, to favor low TTFC for interactive
-clients. `phrase` splits only on phrase punctuation such as commas, semicolons,
+`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default first segment is intentionally
+small, up to 1 word or 8 characters, to favor low TTFC for interactive clients.
+Later scheduled segments can grow up to the provider-specific schedule limits.
+`phrase` splits only on phrase punctuation such as commas, semicolons,
 and question marks. `sentence` synthesizes one sentence at a time. For
 `response_format=pcm`, the server also slices each generated segment into
 smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
