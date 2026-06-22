@@ -1,17 +1,11 @@
 from fastkokoro.config import (
     DEFAULT_JIT,
     DEFAULT_ONNX_ADAIN_FUSION,
-    DEFAULT_ONNX_CONV_ADAIN_FUSION,
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
     DEFAULT_ONNX_IO_BINDING,
     DEFAULT_ONNX_IO_BINDING_DEVICE,
-    DEFAULT_ONNX_TTFC_ATTENTION_MASK_BUCKET,
     DEFAULT_ONNX_TTFC_MODEL_PATH,
-    DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
-    DEFAULT_ONNX_TTFC_WARM_SESSION,
-    DEFAULT_ONNX_TTFC_WARM_TEXTS,
-    DEFAULT_ONNX_TTFC_WARM_TOKEN_COUNTS,
     DEFAULT_PROFILE,
     DEFAULT_RUNTIME_TAIL_FADE_MS,
     DEFAULT_RUNTIME_TAIL_TRIM_MS,
@@ -44,12 +38,6 @@ def test_settings_parses_onnx_providers(monkeypatch):
         "FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY",
         "/tmp/libfastkokoro_adain.so",
     )
-    monkeypatch.setenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION", "true")
-    monkeypatch.setenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", "/tmp/conv_adain.onnx")
-    monkeypatch.setenv(
-        "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY",
-        "/tmp/libfastkokoro_conv_adain.so",
-    )
     monkeypatch.setenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS", "40")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS", "6")
@@ -57,11 +45,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS", "10")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS", "56")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS", "4")
-    monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET", "12")
     monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH", "/tmp/ttfc.onnx")
-    monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_WARM_SESSION", "true")
-    monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_WARM_TEXTS", "Hello world., Bom dia.")
-    monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_WARM_TOKEN_COUNTS", "2,1,2,4")
     monkeypatch.setenv("FASTKOKORO_JIT", "false")
     monkeypatch.setenv("FASTKOKORO_WARMUP_REQUEST", "true")
     monkeypatch.setenv("FASTKOKORO_RUNTIME_TAIL_TRIM_MS", "120")
@@ -92,12 +76,6 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_adain_fusion is True
     assert str(settings.onnx_adain_model_path) == "/tmp/adain.onnx"
     assert str(settings.onnx_adain_custom_op_library) == "/tmp/libfastkokoro_adain.so"
-    assert settings.onnx_conv_adain_fusion is True
-    assert str(settings.onnx_conv_adain_model_path) == "/tmp/conv_adain.onnx"
-    assert (
-        str(settings.onnx_conv_adain_custom_op_library)
-        == "/tmp/libfastkokoro_conv_adain.so"
-    )
     assert settings.onnx_log_severity_level == 2
     assert settings.stream_max_segment_chars == 40
     assert settings.stream_max_segment_words == 6
@@ -105,13 +83,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.stream_schedule_max_segment_words == 10
     assert settings.stream_cpu_schedule_max_segment_chars == 56
     assert settings.stream_cpu_schedule_max_segment_words == 4
-    assert settings.warmup_multi_shape is False
-    assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
-    assert settings.onnx_ttfc_attention_mask_bucket == 12
     assert str(settings.onnx_ttfc_model_path) == "/tmp/ttfc.onnx"
-    assert settings.onnx_ttfc_warm_session is True
-    assert settings.onnx_ttfc_warm_texts == ("Hello world.", "Bom dia.")
-    assert settings.onnx_ttfc_warm_token_counts == (1, 2, 4)
     assert settings.jit is False
     assert settings.warmup_request is True
     assert settings.runtime_tail_trim_ms == 120
@@ -129,15 +101,8 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_FUSION", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_WARM_SESSION", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_WARM_TEXTS", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_WARM_TOKEN_COUNTS", raising=False)
     monkeypatch.delenv("FASTKOKORO_CORS_ALLOW_ORIGINS", raising=False)
 
     settings = Settings.from_env()
@@ -157,26 +122,11 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_fusion == DEFAULT_ONNX_ADAIN_FUSION
     assert settings.onnx_adain_model_path is None
     assert settings.onnx_adain_custom_op_library is None
-    assert settings.onnx_conv_adain_fusion == DEFAULT_ONNX_CONV_ADAIN_FUSION
-    assert settings.onnx_conv_adain_model_path is None
-    assert settings.onnx_conv_adain_custom_op_library is None
     assert settings.model_repo == "msgflux/Kokoro-82M-streaming-onnx"
     assert settings.model_file == "onnx/kokoro-82m-streaming-b24-fp16.onnx"
     assert settings.voices_file == "voices.npz"
-    assert settings.warmup_multi_shape is False
     assert settings.warmup_text == DEFAULT_WARMUP_TEXT
-    assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
-    assert (
-        settings.onnx_ttfc_attention_mask_bucket
-        == DEFAULT_ONNX_TTFC_ATTENTION_MASK_BUCKET
-    )
     assert settings.onnx_ttfc_model_path == DEFAULT_ONNX_TTFC_MODEL_PATH
-    assert settings.onnx_ttfc_warm_session == DEFAULT_ONNX_TTFC_WARM_SESSION
-    assert settings.onnx_ttfc_warm_texts == DEFAULT_ONNX_TTFC_WARM_TEXTS
-    assert (
-        settings.onnx_ttfc_warm_token_counts
-        == DEFAULT_ONNX_TTFC_WARM_TOKEN_COUNTS
-    )
     assert settings.jit == DEFAULT_JIT
     assert settings.warmup_request is False
     assert settings.runtime_tail_trim_ms == DEFAULT_RUNTIME_TAIL_TRIM_MS
@@ -205,14 +155,6 @@ def test_settings_allows_ort_default_thread_options(monkeypatch):
 
     assert settings.onnx_intra_op_num_threads is None
     assert settings.onnx_inter_op_num_threads is None
-
-
-def test_settings_can_disable_ttfc_attention_mask_bucket(monkeypatch):
-    monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET", "0")
-
-    settings = Settings.from_env()
-
-    assert settings.onnx_ttfc_attention_mask_bucket is None
 
 
 def test_settings_parses_auto_providers(monkeypatch):

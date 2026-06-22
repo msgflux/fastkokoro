@@ -25,20 +25,7 @@ DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
 DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
 DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_ONNX_ADAIN_FUSION = False
-DEFAULT_ONNX_CONV_ADAIN_FUSION = False
-DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
-DEFAULT_ONNX_TTFC_ATTENTION_MASK_BUCKET = None
 DEFAULT_ONNX_TTFC_MODEL_PATH = None
-DEFAULT_ONNX_TTFC_WARM_SESSION = False
-DEFAULT_ONNX_TTFC_WARM_TEXTS = (
-    "Hello.",
-    "Hello world.",
-    "Ola.",
-    "Hi there.",
-    "Good morning.",
-    "This is a short latency probe.",
-)
-DEFAULT_ONNX_TTFC_WARM_TOKEN_COUNTS = (1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 22)
 DEFAULT_JIT = True
 DEFAULT_PROFILE = False
 DEFAULT_WARMUP_REQUEST = False
@@ -96,16 +83,7 @@ class Settings:
     onnx_adain_fusion: bool
     onnx_adain_model_path: Path | None
     onnx_adain_custom_op_library: Path | None
-    onnx_conv_adain_fusion: bool
-    onnx_conv_adain_model_path: Path | None
-    onnx_conv_adain_custom_op_library: Path | None
-    warmup_multi_shape: bool
-    onnx_ttfc_shape_buckets: tuple[int, ...]
-    onnx_ttfc_attention_mask_bucket: int | None
     onnx_ttfc_model_path: Path | None
-    onnx_ttfc_warm_session: bool
-    onnx_ttfc_warm_texts: tuple[str, ...]
-    onnx_ttfc_warm_token_counts: tuple[int, ...]
     jit: bool
     warmup: bool
     warmup_text: str
@@ -140,10 +118,6 @@ class Settings:
         provider_options = os.getenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS")
         adain_model_path = os.getenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH")
         adain_custom_op_library = os.getenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY")
-        conv_adain_model_path = os.getenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH")
-        conv_adain_custom_op_library = os.getenv(
-            "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY"
-        )
         ttfc_model_path = os.getenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH")
         cors_allow_origins = os.getenv("FASTKOKORO_CORS_ALLOW_ORIGINS")
         cors_allow_methods = os.getenv("FASTKOKORO_CORS_ALLOW_METHODS")
@@ -241,45 +215,9 @@ class Settings:
                 if adain_custom_op_library
                 else None
             ),
-            onnx_conv_adain_fusion=parse_bool(
-                os.getenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION"),
-                default=DEFAULT_ONNX_CONV_ADAIN_FUSION,
-            ),
-            onnx_conv_adain_model_path=(
-                Path(conv_adain_model_path).expanduser()
-                if conv_adain_model_path
-                else None
-            ),
-            onnx_conv_adain_custom_op_library=(
-                Path(conv_adain_custom_op_library).expanduser()
-                if conv_adain_custom_op_library
-                else None
-            ),
-            warmup_multi_shape=False,
-            onnx_ttfc_shape_buckets=DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
-            onnx_ttfc_attention_mask_bucket=parse_optional_positive_int(
-                os.getenv(
-                    "FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET",
-                    "",
-                ),
-                name="FASTKOKORO_ONNX_TTFC_ATTENTION_MASK_BUCKET",
-            ),
             onnx_ttfc_model_path=(
                 Path(ttfc_model_path).expanduser() if ttfc_model_path else None
             ),
-            onnx_ttfc_warm_session=parse_bool(
-                os.getenv("FASTKOKORO_ONNX_TTFC_WARM_SESSION"),
-                default=DEFAULT_ONNX_TTFC_WARM_SESSION,
-            ),
-            onnx_ttfc_warm_texts=parse_csv(
-                os.getenv("FASTKOKORO_ONNX_TTFC_WARM_TEXTS")
-            )
-            or DEFAULT_ONNX_TTFC_WARM_TEXTS,
-            onnx_ttfc_warm_token_counts=parse_int_csv(
-                os.getenv("FASTKOKORO_ONNX_TTFC_WARM_TOKEN_COUNTS"),
-                name="FASTKOKORO_ONNX_TTFC_WARM_TOKEN_COUNTS",
-            )
-            or DEFAULT_ONNX_TTFC_WARM_TOKEN_COUNTS,
             jit=parse_bool(
                 os.getenv("FASTKOKORO_JIT"),
                 default=DEFAULT_JIT,

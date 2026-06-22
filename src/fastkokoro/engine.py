@@ -16,11 +16,7 @@ except ModuleNotFoundError:
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part, trim_audio_tail
 from fastkokoro.config import Settings
-from fastkokoro.fixed_shape_experiments import resolve_ttfc_attention_mask_model_path
-from fastkokoro.graph_fusion import (
-    resolve_adain_fused_model_path,
-    resolve_conv_adain_fused_model_path,
-)
+from fastkokoro.graph_fusion import resolve_adain_fused_model_path
 from fastkokoro.kokoro import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro
 from fastkokoro.onnx import create_session
 from fastkokoro.quantization import resolve_quantized_model_path
@@ -49,18 +45,18 @@ def _require_ort():
     return ort
 
 
-def _resolve_static_input_width(inputs, input_name: str) -> int:
+def _resolve_token_input_shape(inputs, input_name: str) -> tuple[int, bool]:
     for item in inputs:
         if item.name != input_name:
             continue
         shape = getattr(item, "shape", None)
         if shape is None or len(shape) < 2:
-            return MAX_PHONEME_LENGTH + 2
+            return MAX_PHONEME_LENGTH + 2, False
         width = shape[1]
         if isinstance(width, int) and width > 0:
-            return width
-        return MAX_PHONEME_LENGTH + 2
-    return MAX_PHONEME_LENGTH + 2
+            return width, True
+        return MAX_PHONEME_LENGTH + 2, False
+    return MAX_PHONEME_LENGTH + 2, False
 
 
 OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
@@ -69,30 +65,12 @@ PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
 PHONEME_BREAK_PRIORITY = ("!.?\u2026", ":;", ",\u2014")
 
 _PHONEMIZE_CACHE_MAXSIZE = 128
-TTFC_SYNTHETIC_PHONEME_PATTERNS = (
-    "a",
-    "i",
-    "o",
-    "m",
-    "s",
-    "t",
-    "r",
-    "la",
-    "ma",
-    "sa",
-    "oi",
-    "ai",
-    "ou",
-    "um",
-)
-
-
 @dataclass
 class OnnxInputBuffers:
     token_ids: np.ndarray
     attention_mask: np.ndarray
+    input_lengths: np.ndarray
     speed_float32: np.ndarray
-    speed_int32: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -101,6 +79,7 @@ class OnnxSessionProfile:
     output_name: str
     token_input_name: str
     token_input_width: int
+    token_input_static: bool
 
 
 @dataclass(frozen=True)
@@ -117,21 +96,12 @@ class FastKokoro:
             self.settings,
         )
         self.model_path = resolve_adain_fused_model_path(self.model_path, self.settings)
-        self.model_path = resolve_conv_adain_fused_model_path(
-            self.model_path, self.settings
-        )
-        self.model_path = resolve_ttfc_attention_mask_model_path(
-            self.model_path,
-            self.settings,
-        )
         self.voices_path = resolve_voices_path(self.settings)
         self.session = create_session(self.model_path, self.settings)
         self.ttfc_model_path = self.settings.onnx_ttfc_model_path or self.model_path
         self.ttfc_session = None
         if self.settings.onnx_ttfc_model_path is not None:
             self.ttfc_session = create_session(self.ttfc_model_path, self.settings)
-        elif self.settings.onnx_ttfc_warm_session:
-            self.ttfc_session = create_session(self.model_path, self.settings)
         self.kokoro = Kokoro.from_session(self.session, str(self.voices_path))
         self._voices = tuple(self.kokoro.get_voices())
         self._voice_set = frozenset(self._voices)
@@ -151,7 +121,6 @@ class FastKokoro:
         self._onnx_input_buffers = threading.local()
         self._output_buffers = threading.local()
         self._phonemize_cache: dict[tuple[str, str], str] = {}
-        self._warm_ttfc_session()
         logger.info(
             "fastkokoro engine initialized: model_repo=%s model_file=%s "
             "model_path=%s ttfc_model_path=%s voices_path=%s active_providers=%s "
@@ -176,14 +145,16 @@ class FastKokoro:
     def _build_onnx_session_profile(self, session) -> OnnxSessionProfile:
         input_names = frozenset(item.name for item in session.get_inputs())
         token_input_name = "input_ids" if "input_ids" in input_names else "tokens"
+        token_input_width, token_input_static = _resolve_token_input_shape(
+            session.get_inputs(),
+            token_input_name,
+        )
         return OnnxSessionProfile(
             input_names=input_names,
             output_name=session.get_outputs()[0].name,
             token_input_name=token_input_name,
-            token_input_width=_resolve_static_input_width(
-                session.get_inputs(),
-                token_input_name,
-            ),
+            token_input_width=token_input_width,
+            token_input_static=token_input_static,
         )
 
     def _onnx_profile_for_session(self, session) -> OnnxSessionProfile:
@@ -367,9 +338,7 @@ class FastKokoro:
         buffers = self._get_onnx_input_buffers()
         token_count = len(token_ids)
         token_width = (
-            profile.token_input_width
-            if "attention_mask" in profile.input_names
-            else token_count + 2
+            profile.token_input_width if profile.token_input_static else token_count + 2
         )
         if token_width > buffers.token_ids.shape[1]:
             raise ValueError(
@@ -391,16 +360,15 @@ class FastKokoro:
 
         token_input = buffers.token_ids[:, :token_width]
         style = voice[token_count]
+        buffers.speed_float32[0] = speed
 
         if profile.token_input_name == "input_ids":
-            buffers.speed_int32[0] = speed
             inputs = {
                 "input_ids": token_input,
                 "style": np.array(style, dtype=np.float32),
-                "speed": buffers.speed_int32,
+                "speed": buffers.speed_float32,
             }
         else:
-            buffers.speed_float32[0] = speed
             inputs = {
                 "tokens": token_input,
                 "style": style,
@@ -409,6 +377,9 @@ class FastKokoro:
 
         if "attention_mask" in profile.input_names:
             inputs["attention_mask"] = buffers.attention_mask[:, :token_width]
+        if "input_lengths" in profile.input_names:
+            buffers.input_lengths[0] = token_count + 2
+            inputs["input_lengths"] = buffers.input_lengths
 
         return inputs
 
@@ -419,7 +390,7 @@ class FastKokoro:
         profile: OnnxSessionProfile | None = None,
     ) -> list[str]:
         profile = profile or self._onnx_profile
-        if "attention_mask" not in profile.input_names:
+        if not profile.token_input_static:
             return [phonemes]
 
         max_tokens = profile.token_input_width - 2
@@ -461,194 +432,6 @@ class FastKokoro:
         if current:
             batches.append(current)
         return batches
-
-    def _can_warm_token_count(
-        self,
-        token_count: int,
-        voice: np.ndarray,
-        *,
-        profile: OnnxSessionProfile | None = None,
-    ) -> bool:
-        profile = profile or self._onnx_profile
-        if token_count <= 0 or token_count > MAX_PHONEME_LENGTH:
-            return False
-        if token_count + 2 > profile.token_input_width:
-            return False
-        return token_count < len(voice)
-
-    def _warm_ttfc_shape_buckets(self) -> None:
-        if not self.settings.warmup_multi_shape:
-            return
-        if not self.settings.onnx_ttfc_shape_buckets:
-            return
-
-        voice = self._voice_styles[self.settings.default_voice]
-        lang = self.settings.default_lang
-        warmed: list[int] = []
-
-        for bucket in self.settings.onnx_ttfc_shape_buckets:
-            token_count = bucket - 2
-            if not self._can_warm_token_count(
-                token_count,
-                voice,
-                profile=self._onnx_profile,
-            ):
-                continue
-            inputs = self._build_onnx_inputs(
-                [0] * token_count,
-                voice,
-                1.0,
-                profile=self._onnx_profile,
-            )
-            self.session.run(None, inputs)
-            warmed.append(bucket)
-
-        if self.settings.stream_strategy in {"chunk", "phrase", "sentence"}:
-            strategy_buckets = self._warm_streaming_first_segments(voice, lang)
-            warmed.extend(strategy_buckets)
-
-        if warmed:
-            logger.info("Warmed ONNX TTFC shape buckets: buckets=%s", warmed)
-
-    def _warm_ttfc_session(self) -> None:
-        if self.ttfc_session is None:
-            return
-        if not self.settings.onnx_ttfc_shape_buckets:
-            return
-
-        voice = self._voice_styles[self.settings.default_voice]
-        profile = self._ttfc_onnx_profile or self._onnx_profile
-        warmed: list[int] = []
-        for bucket in self.settings.onnx_ttfc_shape_buckets:
-            token_count = bucket - 2
-            if not self._can_warm_token_count(token_count, voice, profile=profile):
-                continue
-            inputs = self._build_onnx_inputs(
-                [0] * token_count,
-                voice,
-                1.0,
-                profile=profile,
-            )
-            self.ttfc_session.run(None, inputs)
-            warmed.append(bucket)
-
-        for text in self.settings.onnx_ttfc_warm_texts:
-            try:
-                phonemes = self._phonemize_cached(
-                    text,
-                    self.settings.default_lang,
-                )
-                for batch in split_phonemes_for_model(phonemes):
-                    for onnx_batch in self._split_for_onnx_token_width(
-                        batch,
-                        profile=profile,
-                    ):
-                        token_ids = self.kokoro.tokenizer.tokenize(onnx_batch)
-                        if not self._can_warm_token_count(
-                            len(token_ids),
-                            voice,
-                            profile=profile,
-                        ):
-                            continue
-                        inputs = self._build_onnx_inputs(
-                            token_ids,
-                            voice,
-                            1.0,
-                            profile=profile,
-                        )
-                        self.ttfc_session.run(None, inputs)
-            except Exception:
-                logger.exception("Failed to warm TTFC session sample text: %s", text)
-
-        warmed_signatures = self._warm_ttfc_token_signatures(voice, profile)
-        warmed.extend(warmed_signatures)
-
-        if warmed:
-            logger.info("Warmed dedicated ONNX TTFC session: buckets=%s", warmed)
-
-    def _warm_ttfc_token_signatures(
-        self,
-        voice: np.ndarray,
-        profile: OnnxSessionProfile,
-    ) -> list[int]:
-        warmed: list[int] = []
-        for token_count in self.settings.onnx_ttfc_warm_token_counts:
-            if not self._can_warm_token_count(token_count, voice, profile=profile):
-                continue
-            for token_ids in self._synthetic_token_signatures(token_count):
-                if not self._can_warm_token_count(
-                    len(token_ids),
-                    voice,
-                    profile=profile,
-                ):
-                    continue
-                inputs = self._build_onnx_inputs(
-                    token_ids,
-                    voice,
-                    1.0,
-                    profile=profile,
-                )
-                self.ttfc_session.run(None, inputs)
-                if token_count not in warmed:
-                    warmed.append(token_count)
-        return warmed
-
-    def _synthetic_token_signatures(self, token_count: int) -> list[list[int]]:
-        signatures: list[list[int]] = []
-        seen: set[tuple[int, ...]] = set()
-        for pattern in TTFC_SYNTHETIC_PHONEME_PATTERNS:
-            phonemes = self._repeat_phoneme_pattern(pattern, token_count)
-            token_ids = self.kokoro.tokenizer.tokenize(phonemes)
-            if len(token_ids) != token_count:
-                continue
-            key = tuple(token_ids)
-            if key in seen:
-                continue
-            seen.add(key)
-            signatures.append(token_ids)
-            if len(signatures) >= 4:
-                break
-        return signatures
-
-    def _repeat_phoneme_pattern(self, pattern: str, token_count: int) -> str:
-        repeated = (pattern * ((token_count // len(pattern)) + 1))[:token_count]
-        return repeated
-
-    def _warm_streaming_first_segments(self, voice: np.ndarray, lang: str) -> list[int]:
-        warmed: list[int] = []
-        sample_texts = [
-            "Ola,",
-            "Hello,",
-            "Hola,",
-            "Bonjour,",
-            "Ciao,",
-        ]
-        for text in sample_texts:
-            try:
-                phonemes = self.kokoro.tokenizer.phonemize(text, lang)
-                batches = split_phonemes_for_model(phonemes)
-                for batch in batches:
-                    tokens = self.kokoro.tokenizer.tokenize(batch)
-                    token_count = len(tokens)
-                    if not self._can_warm_token_count(
-                        token_count,
-                        voice,
-                        profile=self._onnx_profile,
-                    ):
-                        continue
-                    inputs = self._build_onnx_inputs(
-                        [0] * token_count,
-                        voice,
-                        1.0,
-                        profile=self._onnx_profile,
-                    )
-                    self.session.run(None, inputs)
-                    bucket = token_count + 2
-                    if bucket not in warmed:
-                        warmed.append(bucket)
-            except Exception:
-                continue
-        return warmed
 
     def _run_onnx_audio_iobinding(
         self,
@@ -734,8 +517,8 @@ class FastKokoro:
                     (1, MAX_PHONEME_LENGTH + 2),
                     dtype=np.int64,
                 ),
+                input_lengths=np.zeros(1, dtype=np.int64),
                 speed_float32=np.ones(1, dtype=np.float32),
-                speed_int32=np.ones(1, dtype=np.int32),
             )
             self._onnx_input_buffers.buffers = buffers
         return buffers

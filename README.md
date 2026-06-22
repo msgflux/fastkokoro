@@ -171,9 +171,6 @@ Environment variables:
 | `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
-| `FASTKOKORO_ONNX_CONV_ADAIN_FUSION` | `false` |
-| `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` | unset; generated under cache |
-| `FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` | unset |
 | `FASTKOKORO_CORS_ALLOW_ORIGINS` | `*` |
 | `FASTKOKORO_CORS_ALLOW_METHODS` | `GET,POST,OPTIONS` |
 | `FASTKOKORO_CORS_ALLOW_HEADERS` | `*` |
@@ -205,16 +202,6 @@ startup warmup and speech requests under `FASTKOKORO_PROFILE_DIR`. Each run prod
 raw `.prof` file plus a `.txt` summary sorted by cumulative time. Use
 `FASTKOKORO_PROFILE_WARMUP` and `FASTKOKORO_PROFILE_REQUESTS` to narrow profiling to
 startup or request handling when debugging TTFC regressions.
-
-Inspect ONNX fixed-shape readiness with:
-
-```bash
-uv run python scripts/inspect_onnx_fixed_shape.py /path/to/model.onnx
-```
-
-This reports where dynamic shapes remain reachable from `tokens` or `input_ids`,
-including the anti-pattern where a fixed external input is immediately converted
-back into a dynamic tensor inside the graph.
 
 `FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
 possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
@@ -253,42 +240,17 @@ rewrites generator AdaIN subgraphs into a native custom op. It requires
 `fastkokoro` generates and caches an AdaIN-fused ONNX model under
 `FASTKOKORO_CACHE_DIR/onnx`.
 
-Build and enable the custom op on the target machine with the server flag:
+Build the custom op on the target machine with:
 
 ```bash
-FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-custom-op
+uv run python scripts/build_adain_op.py --print-env
 ```
 
-The flag writes the native library under `FASTKOKORO_CACHE_DIR/native` by
-default, enables AdaIN fusion for the process, and points
-`FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` at the compiled library. Use
-`--custom-op-output /path/libfastkokoro_adain.so` to choose a specific path.
-For manual builds without starting the server, run
-`uv run fastkokoro-build-adain-op --print-env`.
-
-Set `FASTKOKORO_ONNX_CONV_ADAIN_FUSION=true` to use the experimental CPU-only
-`Conv1dAdaIn` custom op optimization. This rewrites generator `Conv -> AdaIN`
-subgraphs into a fused native custom op and can reduce CPU latency in the
-decoder path. It requires `FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider` and
-`FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` pointing to a compiled
-`libfastkokoro_conv_adain.so`. If `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` is
-unset, `fastkokoro` generates and caches a ConvAdaIN-fused ONNX model under
-`FASTKOKORO_CACHE_DIR/onnx`.
-
-Build and enable the ConvAdaIN custom op on the target machine with:
-
-```bash
-FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-conv-custom-op
-```
-
-Or build it manually without starting the server:
-
-```bash
-uv run fastkokoro-build-conv-adain-op --print-env
-```
-
-This path is highly hardware-dependent and may regress latency on some CPUs.
-Always benchmark against the baseline before enabling it in production.
+The script writes the native library under `FASTKOKORO_CACHE_DIR/native` by
+default and prints the `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` export line.
+Set `FASTKOKORO_ONNX_ADAIN_FUSION=true` and
+`FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider` when starting the server if you
+want to enable the CPU custom op.
 
 Restrict CORS by setting one or more allowed origins:
 
