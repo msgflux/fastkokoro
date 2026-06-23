@@ -135,7 +135,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.profile_warmup is DEFAULT_PROFILE
     assert settings.profile_requests is DEFAULT_PROFILE
     assert settings.profile_dir == settings.cache_dir / "profiles"
-    assert settings.stream_strategy == "adaptive"
+    assert settings.stream_strategy == "chunk"
     assert settings.stream_adaptive_max_chars == 50
     assert settings.stream_adaptive_cpu_max_chars == 12
     assert settings.stream_max_segment_chars == 8

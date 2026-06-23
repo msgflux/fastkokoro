@@ -20,13 +20,16 @@ jobs:
         include:
           - variant: cpu
             alias: cpu
-            dockerfile: Dockerfile.cpu
+            dockerfile: docker/Dockerfile.cpu
           - variant: gpu-cuda12.6-cudnn9
             alias: gpu
-            dockerfile: Dockerfile.gpu
+            dockerfile: docker/Dockerfile.gpu
           - variant: gpu-cuda11.8-cudnn8
             alias: gpu-legacy
-            dockerfile: Dockerfile.gpu-legacy
+            dockerfile: docker/Dockerfile.gpu-legacy
+          - variant: tensorrt-25.06
+            alias: tensorrt
+            dockerfile: docker/Dockerfile.tensorrt
 
     steps:
       - name: Checkout

@@ -1,0 +1,70 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN uv venv .venv \
+    && uv pip install --python .venv ".[gpu-legacy]"
+
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS runtime
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV FASTKOKORO_HOST=0.0.0.0
+ENV FASTKOKORO_PORT=8880
+ENV FASTKOKORO_CACHE_DIR=/models
+ENV FASTKOKORO_ONNX_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider
+ENV FASTKOKORO_ONNX_AUTO_PROVIDERS=false
+ENV FASTKOKORO_ONNX_IO_BINDING=true
+ENV FASTKOKORO_ONNX_IO_BINDING_DEVICE=cuda
+ENV FASTKOKORO_ONNX_GRAPH_OPTIMIZATION_LEVEL=all
+
+ENV FASTKOKORO_ONNX_INTER_OP_NUM_THREADS=1
+
+ENV FASTKOKORO_WARMUP=true
+
+ENV FASTKOKORO_STREAM_STRATEGY=chunk
+ENV FASTKOKORO_STREAM_AUDIO_FRAME_MS=200
+ENV FASTKOKORO_STREAM_MAX_SEGMENT_CHARS=8
+ENV FASTKOKORO_STREAM_MAX_SEGMENT_WORDS=1
+ENV FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_CHARS=96
+ENV FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS=12
+
+ENV FASTKOKORO_DEFAULT_VOICE=af_heart
+ENV FASTKOKORO_DEFAULT_LANG=en-us
+ENV FASTKOKORO_WARMUP_TEXT="Hello, world."
+ENV FASTKOKORO_JIT=true
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app /app
+
+EXPOSE 8880
+VOLUME ["/models"]
+
+CMD ["fastkokoro"]

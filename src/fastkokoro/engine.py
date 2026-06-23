@@ -685,7 +685,16 @@ class FastKokoro:
                     if len(sentence) <= adaptive_max:
                         text_segments.append(sentence)
                     else:
-                        text_segments.extend(split_phrases(sentence))
+                        max_chars, max_words = self._stream_schedule_limits()
+                        text_segments.extend(
+                            split_scheduled_chunks(
+                                sentence,
+                                initial_max_chars=self.settings.stream_max_segment_chars,
+                                initial_max_words=self.settings.stream_max_segment_words,
+                                max_chars=max_chars,
+                                max_words=max_words,
+                            )
+                        )
             else:
                 text_segments = split_sentences(segment.text)
 

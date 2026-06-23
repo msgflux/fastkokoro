@@ -92,6 +92,13 @@ Use the published GPU image with NVIDIA Container Toolkit:
 docker run --gpus all -p 8880:8880 msgflux/fastkokoro:gpu
 ```
 
+Use the TensorRT image when the host has a compatible NVIDIA driver and you want
+TensorRT engine caching:
+
+```bash
+docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models msgflux/fastkokoro:tensorrt
+```
+
 Published tags:
 
 | Tag | Description |
@@ -101,23 +108,27 @@ Published tags:
 | `gpu-cuda12.6-cudnn9`, `latest-gpu-cuda12.6-cudnn9` | Latest CUDA 12.6/cuDNN9 GPU image |
 | `gpu-legacy`, `latest-gpu-legacy` | Alias for the CUDA 11.8/cuDNN8 GPU image |
 | `gpu-cuda11.8-cudnn8`, `latest-gpu-cuda11.8-cudnn8` | Latest CUDA 11.8/cuDNN8 GPU image |
-| `0.2.0-cpu`, `0.2-cpu` | Versioned CPU image |
-| `0.2.0-gpu`, `0.2-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
-| `0.2.0-gpu-cuda12.6-cudnn9`, `0.2-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
-| `0.2.0-gpu-legacy`, `0.2-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
-| `0.2.0-gpu-cuda11.8-cudnn8`, `0.2-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
+| `tensorrt`, `latest-tensorrt` | Alias for the latest TensorRT image |
+| `tensorrt-25.06`, `latest-tensorrt-25.06` | TensorRT 25.06 image with ONNX Runtime 1.22 |
+| `0.3.0-cpu`, `0.3-cpu` | Versioned CPU image |
+| `0.3.0-gpu`, `0.3-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
+| `0.3.0-gpu-cuda12.6-cudnn9`, `0.3-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
+| `0.3.0-gpu-legacy`, `0.3-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
+| `0.3.0-gpu-cuda11.8-cudnn8`, `0.3-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
+| `0.3.0-tensorrt`, `0.3-tensorrt` | Versioned TensorRT image alias |
+| `0.3.0-tensorrt-25.06`, `0.3-tensorrt-25.06` | Versioned TensorRT 25.06 image |
 
 Build and run the CPU image locally:
 
 ```bash
-docker build -f Dockerfile.cpu -t fastkokoro:cpu .
+docker build -f docker/Dockerfile.cpu -t fastkokoro:cpu .
 docker run -p 8880:8880 fastkokoro:cpu
 ```
 
 Build and run the GPU image locally:
 
 ```bash
-docker build -f Dockerfile.gpu -t fastkokoro:gpu .
+docker build -f docker/Dockerfile.gpu -t fastkokoro:gpu .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu
 ```
 
@@ -125,9 +136,36 @@ For older NVIDIA drivers or GPUs that do not work with the current CUDA 12
 image, build the CUDA 11.8/cuDNN8 legacy image:
 
 ```bash
-docker build -f Dockerfile.gpu-legacy -t fastkokoro:gpu-legacy .
+docker build -f docker/Dockerfile.gpu-legacy -t fastkokoro:gpu-legacy .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu-legacy
 ```
+
+Build and run the TensorRT image locally:
+
+```bash
+docker build -f docker/Dockerfile.tensorrt -t fastkokoro:tensorrt .
+docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models fastkokoro:tensorrt
+```
+
+TensorRT builds an engine the first time it sees a model, bucket, GPU
+architecture, and provider option set. Keep `/models` mounted so
+`/models/trt-cache` persists; otherwise startup will pay the TensorRT engine
+build cost again.
+
+The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
+published only through the TensorRT 25.06 image. Current Python 3.12 ONNX
+Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
+
+Local server measurements on a GTX 1650 (SM75), using the b24 streaming model,
+engine cache enabled, `response_format=pcm`, and HTTP streaming:
+
+| Scenario | Provider | TTFC p50 |
+| --- | --- | ---: |
+| Short and medium streaming chunks | TensorRT EP | 40.9 ms |
+| Short and medium streaming chunks | CUDA EP | 181.7 ms |
+
+These numbers exclude first-time TensorRT engine build. On the same host, first
+engine build took minutes; persist `/models/trt-cache` for production.
 
 Environment variables:
 
@@ -183,12 +221,13 @@ request latency on the first user request.
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
 the same streaming speech endpoint flow and consume the first chunk.
 
-The default b24 streaming model is optimized for low TTFC. To choose a different
-fixed bucket, set `FASTKOKORO_MODEL_FILE` to one of the other published ONNX
-files:
+The default b24 streaming model is the balanced option for low TTFC without
+over-fragmenting medium text. For minimum TTFC, use b16; for larger chunks, use
+b32 or b48:
 
 ```bash
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b16-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b24-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b32-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b48-fp16.onnx
 ```
@@ -279,6 +318,12 @@ TensorRT with CUDA and CPU fallback:
 
 ```bash
 FASTKOKORO_ONNX_PROVIDERS=TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
+```
+
+Recommended TensorRT provider options:
+
+```bash
+FASTKOKORO_ONNX_PROVIDER_OPTIONS='{"TensorrtExecutionProvider":{"trt_engine_cache_enable":"True","trt_engine_cache_path":"/models/trt-cache","trt_timing_cache_enable":"True","trt_timing_cache_path":"/models/trt-cache"}}'
 ```
 
 Provider options can be passed as JSON keyed by provider name. For example,
