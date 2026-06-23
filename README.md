@@ -241,16 +241,16 @@ raw `.prof` file plus a `.txt` summary sorted by cumulative time. Use
 `FASTKOKORO_PROFILE_WARMUP` and `FASTKOKORO_PROFILE_REQUESTS` to narrow profiling to
 startup or request handling when debugging TTFC regressions.
 
-`FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
-possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
-`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default first segment is intentionally
-small, up to 1 word or 8 characters, to favor low TTFC for interactive clients.
-Later scheduled segments can grow up to the provider-specific schedule limits.
-`phrase` splits only on phrase punctuation such as commas, semicolons,
-and question marks. `sentence` synthesizes one sentence at a time. For
-`response_format=pcm`, the server also slices each generated segment into
-smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
-`FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
+`FASTKOKORO_STREAM_STRATEGY=adaptive` is the default. It keeps short sentences
+intact for more natural prosody, and uses scheduled word-boundary chunks for
+longer sentences to keep TTFC bounded. Set `FASTKOKORO_STREAM_STRATEGY=chunk`
+for minimum TTFC; this enforces `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
+`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` from the first segment, trading continuity
+for lower first audio latency. `phrase` splits only on phrase punctuation such
+as commas, semicolons, and question marks. `sentence` synthesizes one sentence
+at a time. For `response_format=pcm`, the server also slices each generated
+segment into smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`.
+Set `FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
 uses the local fastkokoro synthesis path instead of the upstream engine.
 
 Inline pause tokens can be embedded in input text. `[pause:1.5s]` inserts 1.5
