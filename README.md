@@ -9,8 +9,7 @@ other providers when the matching runtime package is installed. The default
 model is the fixed-bucket streaming export:
 `msgflux/Kokoro-82M-streaming-onnx`.
 
-The default checkpoint is `onnx/kokoro-82m-streaming-b24-fp16.onnx`, paired with
-the ready-to-use `voices.npz` file from the same Hugging Face repository.
+The default checkpoint is `onnx/kokoro-82m-streaming-b24-fp16.onnx`.
 
 ## Demo
 
