@@ -156,9 +156,10 @@ architecture, and provider option set. Keep `/models` mounted so
 `/models/trt-cache` persists; otherwise startup will pay the TensorRT engine
 build cost again.
 
-For longer text where natural phrase continuity matters more than minimum TTFC,
-serve the b48 checkpoint and keep the default segment env values. This lets the
-adaptive scheduler scale the first scheduled chunk from the loaded bucket:
+For short conversational phrases where natural continuity matters more than
+minimum TTFC, serve the b48 checkpoint and keep the default segment env values.
+This lets the adaptive scheduler scale the first scheduled chunk from the loaded
+bucket:
 
 ```bash
 docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models \
@@ -167,6 +168,11 @@ docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models \
   -e FASTKOKORO_STREAM_MAX_SEGMENT_WORDS=2 \
   msgflux/fastkokoro:0.4.0-tensorrt
 ```
+
+b48 increases token capacity, but it still has a fixed waveform budget per model
+call. Keep phrase chunks short enough to fit the vocoder output window; for long
+paragraphs, let `adaptive` split the text instead of forcing whole sentences into
+one inference.
 
 The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
 published only through the TensorRT 25.06 image. Current Python 3.12 ONNX
