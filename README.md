@@ -155,13 +155,14 @@ The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
 published only through the TensorRT 25.06 image. Current Python 3.12 ONNX
 Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
 
-Local server measurements on a GTX 1650 (SM75), using the b24 streaming model,
-engine cache enabled, `response_format=pcm`, and HTTP streaming:
+Local measurements on a GTX 1650 (SM75), using the b24 streaming model,
+`FASTKOKORO_STREAM_STRATEGY=adaptive`, `response_format=pcm`, and HTTP
+streaming:
 
 | Scenario | Provider | TTFC p50 |
 | --- | --- | ---: |
-| Short and medium streaming chunks | TensorRT EP | 40.9 ms |
-| Short and medium streaming chunks | CUDA EP | 181.7 ms |
+| Medium/long adaptive streaming | CUDA EP | 58.7 ms |
+| Medium/long adaptive streaming | TensorRT EP | 46.1 ms |
 
 These numbers exclude first-time TensorRT engine build. On the same host, first
 engine build took minutes; persist `/models/trt-cache` for production.
@@ -220,9 +221,10 @@ request latency on the first user request.
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
 the same streaming speech endpoint flow and consume the first chunk.
 
-The default b24 streaming model is the balanced option for low TTFC without
-over-fragmenting medium text. For minimum TTFC, use b16; for larger chunks, use
-b32 or b48:
+The default b24 streaming model is the balanced option for sub-60 ms local TTFC
+without over-fragmenting medium text. TensorRT EP can reduce TTFC below 50 ms
+after its engine cache is built. For minimum TTFC with very short chunks, use
+b16; for larger chunks, use b32 or b48:
 
 ```bash
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b16-fp16.onnx
@@ -230,6 +232,19 @@ FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b24-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b32-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b48-fp16.onnx
 ```
+
+Bucket size controls the maximum token width of each model call. Two positions
+are reserved by the model, so usable text capacity is `bucket - 2` tokens. Word
+counts are approximate because phoneme tokens vary by language and word length.
+
+| Bucket | Usable tokens | Approx words | Notes |
+| ---: | ---: | ---: | --- |
+| 16 | 14 | 1-2 | Lowest TTFC; two short English words fit, but many Portuguese or longer two-word chunks can overflow |
+| 24 | 22 | 2-4 | Recommended default; supports the adaptive 2-word first chunk safely in normal usage |
+| 32 | 30 | 4-5 | Larger chunks with moderate latency |
+| 48 | 46 | 6-8 | Fewer model calls for longer text |
+| 64 | 62 | 8-11 | Candidate larger export for paragraph-style streaming |
+| 128 | 126 | 16-23 | Candidate maximum-continuity export with higher TTFC |
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
