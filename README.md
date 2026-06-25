@@ -239,10 +239,10 @@ counts are approximate because phoneme tokens vary by language and word length.
 
 | Bucket | Usable tokens | Approx words | Notes |
 | ---: | ---: | ---: | --- |
-| 16 | 14 | 1-2 | Lowest TTFC; two short English words fit, but many Portuguese or longer two-word chunks can overflow |
-| 24 | 22 | 2-4 | Recommended default; supports the adaptive 2-word first chunk safely in normal usage |
-| 32 | 30 | 4-5 | Larger chunks with moderate latency |
-| 48 | 46 | 6-8 | Fewer model calls for longer text |
+| 16 | 14 | 1-2 | Lowest TTFC; adaptive first chunk targets 1 word |
+| 24 | 22 | 2-4 | Recommended default; adaptive first chunk targets 2 words |
+| 32 | 30 | 4-5 | Larger chunks with moderate latency; adaptive first chunk targets 4 words |
+| 48 | 46 | 6-8 | Fewer model calls for longer text; adaptive first chunk targets 6 words |
 | 64 | 62 | 8-11 | Candidate larger export for paragraph-style streaming |
 | 128 | 126 | 16-23 | Candidate maximum-continuity export with higher TTFC |
 
@@ -258,7 +258,9 @@ startup or request handling when debugging TTFC regressions.
 
 `FASTKOKORO_STREAM_STRATEGY=adaptive` is the default. It keeps short sentences
 intact for more natural prosody, and uses scheduled word-boundary chunks for
-longer sentences to keep TTFC bounded. Set `FASTKOKORO_STREAM_STRATEGY=chunk`
+longer sentences to keep TTFC bounded. With default settings, the first scheduled
+chunk scales with the loaded model bucket; explicit segment env vars override
+that schedule. Set `FASTKOKORO_STREAM_STRATEGY=chunk`
 for minimum TTFC; this enforces `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
 `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` from the first segment, trading continuity
 for lower first audio latency. `phrase` splits only on phrase punctuation such

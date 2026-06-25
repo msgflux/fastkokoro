@@ -124,10 +124,14 @@ def profile_once(
 
     if strategy == "chunk":
         max_chars, max_words = engine._stream_schedule_limits()
+        initial_chars, initial_words = engine._stream_initial_schedule_limits(
+            max_chars,
+            max_words,
+        )
         segments = split_scheduled_chunks(
             text,
-            initial_max_chars=engine.settings.stream_max_segment_chars,
-            initial_max_words=engine.settings.stream_max_segment_words,
+            initial_max_chars=initial_chars,
+            initial_max_words=initial_words,
             max_chars=max_chars,
             max_words=max_words,
         )

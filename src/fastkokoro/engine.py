@@ -15,7 +15,11 @@ except ModuleNotFoundError:
 
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part, trim_audio_tail
-from fastkokoro.config import Settings
+from fastkokoro.config import (
+    DEFAULT_STREAM_MAX_SEGMENT_CHARS,
+    DEFAULT_STREAM_MAX_SEGMENT_WORDS,
+    Settings,
+)
 from fastkokoro.graph_fusion import resolve_adain_fused_model_path
 from fastkokoro.kokoro import MAX_PHONEME_LENGTH, SAMPLE_RATE, Kokoro
 from fastkokoro.onnx import create_session
@@ -654,6 +658,24 @@ class FastKokoro:
             self.settings.stream_cpu_schedule_max_segment_words,
         )
 
+    def _stream_initial_schedule_limits(
+        self, max_chars: int, max_words: int
+    ) -> tuple[int, int]:
+        if (
+            self.settings.stream_max_segment_chars != DEFAULT_STREAM_MAX_SEGMENT_CHARS
+            or self.settings.stream_max_segment_words
+            != DEFAULT_STREAM_MAX_SEGMENT_WORDS
+        ):
+            return (
+                min(self.settings.stream_max_segment_chars, max_chars),
+                min(self.settings.stream_max_segment_words, max_words),
+            )
+
+        usable_tokens = max(1, self._token_input_width - 2)
+        initial_words = max(1, int(usable_tokens / 7.5))
+        initial_chars = max(DEFAULT_STREAM_MAX_SEGMENT_CHARS, initial_words * 12)
+        return min(initial_chars, max_chars), min(initial_words, max_words)
+
     def _stream_text_control_segments(self, text: str) -> list[TextControlSegment]:
         segments: list[TextControlSegment] = []
         for segment in split_text_control_segments(text):
@@ -663,10 +685,14 @@ class FastKokoro:
 
             if self.settings.stream_strategy == "chunk":
                 max_chars, max_words = self._stream_schedule_limits()
+                initial_chars, initial_words = self._stream_initial_schedule_limits(
+                    max_chars,
+                    max_words,
+                )
                 text_segments = split_scheduled_chunks(
                     segment.text,
-                    initial_max_chars=self.settings.stream_max_segment_chars,
-                    initial_max_words=self.settings.stream_max_segment_words,
+                    initial_max_chars=initial_chars,
+                    initial_max_words=initial_words,
                     max_chars=max_chars,
                     max_words=max_words,
                 )
@@ -688,11 +714,17 @@ class FastKokoro:
                         text_segments.append(sentence)
                     else:
                         max_chars, max_words = self._stream_schedule_limits()
+                        initial_chars, initial_words = (
+                            self._stream_initial_schedule_limits(
+                                max_chars,
+                                max_words,
+                            )
+                        )
                         text_segments.extend(
                             split_scheduled_chunks(
                                 sentence,
-                                initial_max_chars=self.settings.stream_max_segment_chars,
-                                initial_max_words=self.settings.stream_max_segment_words,
+                                initial_max_chars=initial_chars,
+                                initial_max_words=initial_words,
                                 max_chars=max_chars,
                                 max_words=max_words,
                             )
