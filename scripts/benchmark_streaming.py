@@ -57,65 +57,67 @@ async def main() -> None:
         for variant_index, text in enumerate(texts, start=1):
             variant_name = f"{text_name}:{variant_index}"
             measurements = (
-            await measure(
-                "kokoro_create_stream",
-                variant_name,
-                text,
-                kokoro_create_stream(engine, text, args.voice, args.lang, args.speed),
-                engine,
-            ),
-            await measure(
-                "sentence_segments",
-                variant_name,
-                text,
-                sentence_segment_stream(
-                    engine, text, args.voice, args.lang, args.speed
-                ),
-                engine,
-            ),
-            await measure(
-                f"phrase_segments_{args.audio_frame_ms}ms_frames",
-                variant_name,
-                text,
-                framed_phrase_segment_stream(
-                    engine,
+                await measure(
+                    "kokoro_create_stream",
+                    variant_name,
                     text,
-                    args.voice,
-                    args.lang,
-                    args.speed,
-                    args.audio_frame_ms,
-                ),
-                engine,
-            ),
-            await measure(
-                f"chunk_segments_{args.audio_frame_ms}ms_frames",
-                variant_name,
-                text,
-                framed_chunk_segment_stream(
+                    kokoro_create_stream(
+                        engine, text, args.voice, args.lang, args.speed
+                    ),
                     engine,
-                    text,
-                    args.voice,
-                    args.lang,
-                    args.speed,
-                    args.audio_frame_ms,
                 ),
-                engine,
-            ),
-            await measure(
-                f"sentence_segments_{args.audio_frame_ms}ms_frames",
-                variant_name,
-                text,
-                framed_sentence_segment_stream(
+                await measure(
+                    "sentence_segments",
+                    variant_name,
+                    text,
+                    sentence_segment_stream(
+                        engine, text, args.voice, args.lang, args.speed
+                    ),
                     engine,
-                    text,
-                    args.voice,
-                    args.lang,
-                    args.speed,
-                    args.audio_frame_ms,
                 ),
-                engine,
-            ),
-        )
+                await measure(
+                    f"phrase_segments_{args.audio_frame_ms}ms_frames",
+                    variant_name,
+                    text,
+                    framed_phrase_segment_stream(
+                        engine,
+                        text,
+                        args.voice,
+                        args.lang,
+                        args.speed,
+                        args.audio_frame_ms,
+                    ),
+                    engine,
+                ),
+                await measure(
+                    f"chunk_segments_{args.audio_frame_ms}ms_frames",
+                    variant_name,
+                    text,
+                    framed_chunk_segment_stream(
+                        engine,
+                        text,
+                        args.voice,
+                        args.lang,
+                        args.speed,
+                        args.audio_frame_ms,
+                    ),
+                    engine,
+                ),
+                await measure(
+                    f"sentence_segments_{args.audio_frame_ms}ms_frames",
+                    variant_name,
+                    text,
+                    framed_sentence_segment_stream(
+                        engine,
+                        text,
+                        args.voice,
+                        args.lang,
+                        args.speed,
+                        args.audio_frame_ms,
+                    ),
+                    engine,
+                ),
+            )
             for result in measurements:
                 if args.json_array:
                     results.append(result)

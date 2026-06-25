@@ -321,11 +321,11 @@ def test_speech_profiling_writes_request_artifacts(tmp_path):
     )
 
     assert response.status_code == 200
-    profiles = sorted(tmp_path.glob('*speech-non-streaming*.prof'))
-    summaries = sorted(tmp_path.glob('*speech-non-streaming*.txt'))
+    profiles = sorted(tmp_path.glob("*speech-non-streaming*.prof"))
+    summaries = sorted(tmp_path.glob("*speech-non-streaming*.txt"))
     assert len(profiles) == 1
     assert len(summaries) == 1
-    assert 'cumtime' in summaries[0].read_text()
+    assert "cumtime" in summaries[0].read_text()
 
 
 def test_warmup_profiling_writes_startup_artifacts(tmp_path):
@@ -341,8 +341,8 @@ def test_warmup_profiling_writes_startup_artifacts(tmp_path):
         pass
 
     assert engine.warmup_calls == 1
-    profiles = sorted(tmp_path.glob('*startup-warmup*.prof'))
-    summaries = sorted(tmp_path.glob('*startup-warmup*.txt'))
+    profiles = sorted(tmp_path.glob("*startup-warmup*.prof"))
+    summaries = sorted(tmp_path.glob("*startup-warmup*.txt"))
     assert len(profiles) == 1
     assert len(summaries) == 1
 

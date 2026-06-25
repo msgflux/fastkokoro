@@ -141,8 +141,7 @@ async def main():
     print(f"Active providers: {providers}", flush=True)
     first_text = get_text(args.text, 0)
     print(
-        f"Text corpus: [{args.text}] variants rotating, "
-        f"first chars={len(first_text)}",
+        f"Text corpus: [{args.text}] variants rotating, first chars={len(first_text)}",
         flush=True,
     )
     print(f"Voice={args.voice} Lang={args.lang} Speed={args.speed}", flush=True)

@@ -94,7 +94,6 @@ def create_app(
             app.state.profiler = Profiler(get_settings())
         return app.state.profiler
 
-
     async def generate_speech_response(
         request: SpeechRequest,
         *,

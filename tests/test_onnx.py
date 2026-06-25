@@ -344,4 +344,3 @@ def test_create_session_rejects_adain_fusion_with_non_cpu_provider():
                 onnx_adain_custom_op_library=Path("/tmp/libfastkokoro_adain.so"),
             ),
         )
-

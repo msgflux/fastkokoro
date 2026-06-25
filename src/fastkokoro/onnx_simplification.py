@@ -67,9 +67,7 @@ def simplify_onnx_model(model_path: Path, output_path: Path) -> Path:
 def _should_simplify_for_cpu(providers: list[str]) -> bool:
     if "CPUExecutionProvider" not in providers:
         return False
-    return not any(
-        provider.startswith(GPU_PROVIDER_PREFIXES) for provider in providers
-    )
+    return not any(provider.startswith(GPU_PROVIDER_PREFIXES) for provider in providers)
 
 
 def _simplified_cache_path(model_path: Path, settings: Settings) -> Path:

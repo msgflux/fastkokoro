@@ -288,8 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--length-aware",
         action="store_true",
         help=(
-            "Export input_lengths and mask padded bucket slots from "
-            "duration/alignment."
+            "Export input_lengths and mask padded bucket slots from duration/alignment."
         ),
     )
     parser.add_argument(
