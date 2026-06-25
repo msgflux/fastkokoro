@@ -21,8 +21,17 @@ from dataclasses import asdict, dataclass
 from statistics import fmean, median
 
 from fastkokoro.engine import FastKokoro
-from fastkokoro.streaming import split_pcm_frames, split_phrases, split_sentences
-from scripts.benchmark_corpus import corpus_choices, get_text
+from fastkokoro.streaming import (
+    split_pcm_frames,
+    split_phrases,
+    split_scheduled_chunks,
+    split_sentences,
+)
+
+try:
+    from scripts.benchmark_corpus import corpus_choices, get_text
+except ModuleNotFoundError:
+    from benchmark_corpus import corpus_choices, get_text
 
 
 @dataclass
@@ -72,13 +81,12 @@ def make_stream(
     resolved_voice, resolved_lang = engine.resolve_request(voice, lang)
 
     if strategy == "chunk":
-        from fastkokoro.streaming import split_scheduled_chunks
-
         c, w = engine._stream_schedule_limits()
+        initial_chars, initial_words = engine._stream_initial_schedule_limits(c, w)
         segments = split_scheduled_chunks(
             text,
-            initial_max_chars=engine.settings.stream_max_segment_chars,
-            initial_max_words=engine.settings.stream_max_segment_words,
+            initial_max_chars=initial_chars,
+            initial_max_words=initial_words,
             max_chars=c,
             max_words=w,
         )
@@ -99,7 +107,19 @@ def make_stream(
             if len(sentence) <= adaptive_max:
                 segments.append(sentence)
             else:
-                segments.extend(split_phrases(sentence))
+                c, w = engine._stream_schedule_limits()
+                initial_chars, initial_words = engine._stream_initial_schedule_limits(
+                    c, w
+                )
+                segments.extend(
+                    split_scheduled_chunks(
+                        sentence,
+                        initial_max_chars=initial_chars,
+                        initial_max_words=initial_words,
+                        max_chars=c,
+                        max_words=w,
+                    )
+                )
     else:
         segments = split_sentences(text)
 

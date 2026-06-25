@@ -163,6 +163,40 @@ def _set_providers(engine, providers):
     )
 
 
+def test_stream_initial_schedule_limits_scale_with_bucket():
+    engine = _engine(
+        _settings(
+            stream_max_segment_chars=24,
+            stream_max_segment_words=2,
+        )
+    )
+
+    cases = [
+        (16, (24, 1)),
+        (24, (24, 2)),
+        (32, (48, 4)),
+        (48, (72, 6)),
+        (64, (96, 8)),
+        (128, (96, 12)),
+    ]
+    for token_width, expected in cases:
+        engine._token_input_width = token_width
+
+        assert engine._stream_initial_schedule_limits(96, 12) == expected
+
+
+def test_stream_initial_schedule_limits_respect_explicit_settings():
+    engine = _engine(
+        _settings(
+            stream_max_segment_chars=80,
+            stream_max_segment_words=3,
+        )
+    )
+    engine._token_input_width = 48
+
+    assert engine._stream_initial_schedule_limits(96, 12) == (80, 3)
+
+
 @pytest.mark.asyncio
 async def test_sentence_stream_splits_text_and_pcm_frames():
     engine = _engine(_settings(stream_strategy="sentence", stream_audio_frame_ms=1))
@@ -316,6 +350,44 @@ async def test_chunk_stream_uses_gpu_schedule_limits():
         "three four five six",
         "seven eight nine ten eleven twelve thirteen fourteen",
         "fifteen sixteen seventeen eighteen",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_adaptive_stream_scales_initial_segment_with_gpu_bucket():
+    engine = _engine(
+        _settings(
+            stream_strategy="adaptive",
+            stream_audio_frame_ms=1,
+            stream_max_segment_chars=24,
+            stream_max_segment_words=2,
+            stream_schedule_max_segment_chars=96,
+            stream_schedule_max_segment_words=12,
+        )
+    )
+    engine._token_input_width = 48
+    _set_providers(engine, ["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            (
+                "one two three four five six seven eight nine ten eleven twelve "
+                "thirteen fourteen fifteen sixteen seventeen eighteen nineteen"
+            ),
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert engine.kokoro.created_texts == [
+        "one two three four five six",
+        (
+            "seven eight nine ten eleven twelve thirteen fourteen "
+            "fifteen sixteen seventeen eighteen"
+        ),
+        "nineteen",
     ]
 
 
