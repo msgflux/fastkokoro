@@ -10,15 +10,7 @@ from dataclasses import asdict, dataclass, replace
 
 from fastkokoro.config import Settings
 from fastkokoro.engine import FastKokoro
-
-TEXTS = {
-    "tiny": "Ola.",
-    "short": "Ola, tudo bem?",
-    "medium": (
-        "Ola, tudo bem? Este e um teste de sintese de voz em portugues brasileiro. "
-        "Estamos medindo a latencia ate o primeiro chunk e o tempo total de geracao."
-    ),
-}
+from scripts.benchmark_corpus import corpus_choices, get_text
 
 
 @dataclass(frozen=True)
@@ -60,7 +52,7 @@ async def main() -> None:
     parser.add_argument("--voice", default="pf_dora")
     parser.add_argument("--lang", default="p")
     parser.add_argument("--speed", type=float, default=1.0)
-    parser.add_argument("--text", choices=TEXTS, default="short")
+    parser.add_argument("--text", choices=corpus_choices(), default="short")
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--intra-op", type=int, default=None)
@@ -85,7 +77,6 @@ async def main() -> None:
         settings = replace(settings, onnx_intra_op_num_threads=args.intra_op)
     if args.inter_op is not None:
         settings = replace(settings, onnx_inter_op_num_threads=args.inter_op)
-    text = TEXTS[args.text]
     engine = FastKokoro(settings)
     if args.warmup:
         engine.warmup()
@@ -99,6 +90,7 @@ async def main() -> None:
         ("stream_kokoro", stream_kokoro),
     ):
         for iteration in range(1, args.iterations + 1):
+            text = get_text(args.text, iteration - 1)
             run = await measure(
                 strategy,
                 args.text,

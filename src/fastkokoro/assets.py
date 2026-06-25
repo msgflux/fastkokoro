@@ -26,13 +26,16 @@ def resolve_voices_path(settings: Settings) -> Path:
     if settings.voices_path is not None:
         return settings.voices_path
 
-    voices_bin = Path(
+    voices_path = Path(
         hf_hub_download(
             repo_id=settings.model_repo,
             filename=settings.voices_file,
             cache_dir=settings.cache_dir,
         )
     )
+    if voices_path.suffix == ".npz":
+        return voices_path
+
     voices_index = Path(
         hf_hub_download(
             repo_id=settings.model_repo,
@@ -40,7 +43,7 @@ def resolve_voices_path(settings: Settings) -> Path:
             cache_dir=settings.cache_dir,
         )
     )
-    return convert_raw_voices_to_npz(voices_bin, voices_index, settings.cache_dir)
+    return convert_raw_voices_to_npz(voices_path, voices_index, settings.cache_dir)
 
 
 def convert_raw_voices_to_npz(

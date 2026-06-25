@@ -5,9 +5,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_MODEL_REPO = "nvidia/kokoro-82M-onnx-opt"
-DEFAULT_MODEL_FILE = "kokoro-82m-v1.0.onnx"
-DEFAULT_VOICES_FILE = "voices.bin"
+DEFAULT_MODEL_REPO = "msgflux/Kokoro-82M-streaming-onnx"
+DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b24-fp16.onnx"
+DEFAULT_VOICES_FILE = "voices.npz"
 DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
 DEFAULT_LANG = "en-us"
@@ -25,17 +25,21 @@ DEFAULT_ONNX_WEIGHT_ONLY_BLOCK_SIZE = 128
 DEFAULT_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL = 4
 DEFAULT_ONNX_WEIGHT_ONLY_SYMMETRIC = True
 DEFAULT_ONNX_ADAIN_FUSION = False
-DEFAULT_ONNX_CONV_ADAIN_FUSION = False
-DEFAULT_WARMUP_MULTI_SHAPE = False
-DEFAULT_ONNX_TTFC_SHAPE_BUCKETS = (6, 7, 8, 9, 10, 11, 12, 16, 24)
+DEFAULT_ONNX_TTFC_MODEL_PATH = None
 DEFAULT_JIT = True
-DEFAULT_WARMUP_TEXT = "hello"
+DEFAULT_PROFILE = False
+DEFAULT_WARMUP_REQUEST = False
+DEFAULT_WARMUP_TEXT = (
+    "Hello there. This is a warmup request for streaming speech generation."
+)
+DEFAULT_RUNTIME_TAIL_TRIM_MS = 150
+DEFAULT_RUNTIME_TAIL_FADE_MS = 72
 DEFAULT_STREAM_STRATEGY = "adaptive"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
-DEFAULT_STREAM_MAX_SEGMENT_CHARS = 32
-DEFAULT_STREAM_MAX_SEGMENT_WORDS = 2
+DEFAULT_STREAM_MAX_SEGMENT_CHARS = 8
+DEFAULT_STREAM_MAX_SEGMENT_WORDS = 1
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS = 12
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS = 48
@@ -79,14 +83,17 @@ class Settings:
     onnx_adain_fusion: bool
     onnx_adain_model_path: Path | None
     onnx_adain_custom_op_library: Path | None
-    onnx_conv_adain_fusion: bool
-    onnx_conv_adain_model_path: Path | None
-    onnx_conv_adain_custom_op_library: Path | None
-    warmup_multi_shape: bool
-    onnx_ttfc_shape_buckets: tuple[int, ...]
+    onnx_ttfc_model_path: Path | None
     jit: bool
     warmup: bool
     warmup_text: str
+    warmup_request: bool
+    runtime_tail_trim_ms: int
+    runtime_tail_fade_ms: int
+    profile: bool
+    profile_dir: Path
+    profile_warmup: bool
+    profile_requests: bool
     stream_strategy: str
     stream_audio_frame_ms: int
     stream_max_segment_chars: int
@@ -111,13 +118,15 @@ class Settings:
         provider_options = os.getenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS")
         adain_model_path = os.getenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH")
         adain_custom_op_library = os.getenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY")
-        conv_adain_model_path = os.getenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH")
-        conv_adain_custom_op_library = os.getenv(
-            "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY"
-        )
+        ttfc_model_path = os.getenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH")
         cors_allow_origins = os.getenv("FASTKOKORO_CORS_ALLOW_ORIGINS")
         cors_allow_methods = os.getenv("FASTKOKORO_CORS_ALLOW_METHODS")
         cors_allow_headers = os.getenv("FASTKOKORO_CORS_ALLOW_HEADERS")
+        profile_dir = os.getenv("FASTKOKORO_PROFILE_DIR")
+        profile_enabled = parse_bool(
+            os.getenv("FASTKOKORO_PROFILE"),
+            default=DEFAULT_PROFILE,
+        )
 
         return cls(
             model_repo=os.getenv("FASTKOKORO_MODEL_REPO", DEFAULT_MODEL_REPO),
@@ -206,35 +215,47 @@ class Settings:
                 if adain_custom_op_library
                 else None
             ),
-            onnx_conv_adain_fusion=parse_bool(
-                os.getenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION"),
-                default=DEFAULT_ONNX_CONV_ADAIN_FUSION,
+            onnx_ttfc_model_path=(
+                Path(ttfc_model_path).expanduser() if ttfc_model_path else None
             ),
-            onnx_conv_adain_model_path=(
-                Path(conv_adain_model_path).expanduser()
-                if conv_adain_model_path
-                else None
-            ),
-            onnx_conv_adain_custom_op_library=(
-                Path(conv_adain_custom_op_library).expanduser()
-                if conv_adain_custom_op_library
-                else None
-            ),
-            warmup_multi_shape=parse_bool(
-                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE"),
-                default=DEFAULT_WARMUP_MULTI_SHAPE,
-            ),
-            onnx_ttfc_shape_buckets=parse_int_csv(
-                os.getenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS"),
-                name="FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS",
-            )
-            or DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
             jit=parse_bool(
                 os.getenv("FASTKOKORO_JIT"),
                 default=DEFAULT_JIT,
             ),
             warmup=parse_bool(os.getenv("FASTKOKORO_WARMUP"), default=True),
             warmup_text=os.getenv("FASTKOKORO_WARMUP_TEXT", DEFAULT_WARMUP_TEXT),
+            warmup_request=parse_bool(
+                os.getenv("FASTKOKORO_WARMUP_REQUEST"),
+                default=DEFAULT_WARMUP_REQUEST,
+            ),
+            runtime_tail_trim_ms=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_RUNTIME_TAIL_TRIM_MS",
+                    str(DEFAULT_RUNTIME_TAIL_TRIM_MS),
+                ),
+                name="FASTKOKORO_RUNTIME_TAIL_TRIM_MS",
+            ),
+            runtime_tail_fade_ms=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_RUNTIME_TAIL_FADE_MS",
+                    str(DEFAULT_RUNTIME_TAIL_FADE_MS),
+                ),
+                name="FASTKOKORO_RUNTIME_TAIL_FADE_MS",
+            ),
+            profile=profile_enabled,
+            profile_dir=(
+                Path(profile_dir).expanduser()
+                if profile_dir
+                else Path(cache_dir or "~/.cache/fastkokoro").expanduser() / "profiles"
+            ),
+            profile_warmup=parse_bool(
+                os.getenv("FASTKOKORO_PROFILE_WARMUP"),
+                default=profile_enabled,
+            ),
+            profile_requests=parse_bool(
+                os.getenv("FASTKOKORO_PROFILE_REQUESTS"),
+                default=profile_enabled,
+            ),
             stream_strategy=parse_stream_strategy(
                 os.getenv("FASTKOKORO_STREAM_STRATEGY", DEFAULT_STREAM_STRATEGY)
             ),
@@ -364,6 +385,17 @@ def parse_optional_int(value: str | None) -> int | None:
     if value is None or value.strip() == "":
         return None
     return int(value)
+
+
+def parse_optional_positive_int(value: str | None, *, name: str) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+    parsed = int(value)
+    if parsed == 0:
+        return None
+    if parsed < 0:
+        raise ValueError(f"{name} must be zero or greater")
+    return parsed
 
 
 def parse_positive_int(value: str | None, *, name: str) -> int:

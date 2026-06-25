@@ -15,6 +15,7 @@ dependencies = [
     "numpy>=1.26,<3",
     "onnx>=1.16.0",
     "onnx-ir>=0.1.0",
+    "onnxsim>=0.4.36",
     "orjson>=3.10.0",
     "phonemizer-fork>=3.3.2",
     "pydantic>=2.0.0",
@@ -37,8 +38,6 @@ gpu-legacy = [
 
 [project.scripts]
 fastkokoro = "fastkokoro.cli:main"
-fastkokoro-build-adain-op = "fastkokoro.build_adain_op:main"
-fastkokoro-build-conv-adain-op = "fastkokoro.build_conv_adain_op:main"
 
 [dependency-groups]
 dev = [

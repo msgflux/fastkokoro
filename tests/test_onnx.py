@@ -7,6 +7,7 @@ import pytest
 
 from fastkokoro.config import Settings
 from fastkokoro.onnx import create_session
+from fastkokoro.onnx_simplification import resolve_cpu_simplified_model_path
 
 
 class FakeSessionOptions:
@@ -77,14 +78,19 @@ def _settings(**overrides):
         onnx_adain_fusion=False,
         onnx_adain_model_path=None,
         onnx_adain_custom_op_library=None,
-        onnx_conv_adain_fusion=False,
-        onnx_conv_adain_model_path=None,
-        onnx_conv_adain_custom_op_library=None,
-        warmup_multi_shape=False,
-        onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        onnx_ttfc_model_path=None,
         jit=False,
         warmup=False,
-        warmup_text="hello",
+        warmup_text=(
+            "Hello there. This is a warmup request for streaming speech generation."
+        ),
+        warmup_request=False,
+        runtime_tail_trim_ms=150,
+        runtime_tail_fade_ms=72,
+        profile=False,
+        profile_dir=Path("/tmp/cache/profiles"),
+        profile_warmup=False,
+        profile_requests=False,
         stream_strategy="sentence",
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
@@ -136,6 +142,46 @@ def test_create_session_uses_configured_providers():
     assert init.call_args.kwargs["providers"] == ["CPUExecutionProvider"]
     assert init.call_args.kwargs["provider_options"] == [{}]
     assert session.get_providers.called
+
+
+def test_resolve_cpu_simplified_model_path_generates_cached_model(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"onnx")
+    cached = tmp_path / "cache" / "model.sim.onnx"
+
+    with (
+        patch(
+            "fastkokoro.onnx_simplification._simplified_cache_path",
+            return_value=cached,
+        ),
+        patch(
+            "fastkokoro.onnx_simplification.simplify_onnx_model",
+            return_value=cached,
+        ) as simplify,
+    ):
+        result = resolve_cpu_simplified_model_path(
+            model_path,
+            _settings(cache_dir=tmp_path / "cache"),
+            ["CPUExecutionProvider"],
+        )
+
+    assert result == cached
+    simplify.assert_called_once_with(model_path, cached)
+
+
+def test_resolve_cpu_simplified_model_path_skips_gpu_provider(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"onnx")
+
+    with patch("fastkokoro.onnx_simplification.simplify_onnx_model") as simplify:
+        result = resolve_cpu_simplified_model_path(
+            model_path,
+            _settings(cache_dir=tmp_path / "cache"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+
+    assert result == model_path
+    simplify.assert_not_called()
 
 
 def test_create_session_auto_uses_all_available_providers():
@@ -296,68 +342,5 @@ def test_create_session_rejects_adain_fusion_with_non_cpu_provider():
                 onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
                 onnx_adain_fusion=True,
                 onnx_adain_custom_op_library=Path("/tmp/libfastkokoro_adain.so"),
-            ),
-        )
-
-
-def test_create_session_registers_conv_adain_custom_op_library():
-    custom_op_library = Path("/tmp/libfastkokoro_conv_adain.so")
-    with (
-        patch(
-            "fastkokoro.onnx.ort.get_available_providers",
-            return_value=["CPUExecutionProvider"],
-        ),
-        patch("fastkokoro.onnx.ort.SessionOptions", FakeSessionOptions),
-        patch("fastkokoro.onnx.ort.InferenceSession") as init,
-    ):
-        create_session(
-            Path("model.onnx"),
-            _settings(
-                onnx_conv_adain_fusion=True,
-                onnx_conv_adain_custom_op_library=custom_op_library,
-            ),
-        )
-
-    session_options = init.call_args.kwargs["sess_options"]
-    assert session_options._registered_custom_ops_library == [str(custom_op_library)]
-
-
-def test_create_session_rejects_conv_adain_fusion_with_non_cpu_provider():
-    with (
-        patch(
-            "fastkokoro.onnx.ort.get_available_providers",
-            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
-        ),
-        pytest.raises(ValueError, match="CONV_ADAIN_FUSION"),
-    ):
-        create_session(
-            Path("model.onnx"),
-            _settings(
-                onnx_providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
-                onnx_conv_adain_fusion=True,
-                onnx_conv_adain_custom_op_library=Path(
-                    "/tmp/libfastkokoro_conv_adain.so"
-                ),
-            ),
-        )
-
-
-def test_create_session_rejects_adain_and_conv_adain_together():
-    with (
-        patch(
-            "fastkokoro.onnx.ort.get_available_providers",
-            return_value=["CPUExecutionProvider"],
-        ),
-        pytest.raises(ValueError, match="cannot be enabled at the same time"),
-    ):
-        create_session(
-            Path("model.onnx"),
-            _settings(
-                onnx_adain_fusion=True,
-                onnx_adain_custom_op_library=Path("/tmp/libfastkokoro_adain.so"),
-                onnx_conv_adain_fusion=True,
-                onnx_conv_adain_custom_op_library=Path(
-                    "/tmp/libfastkokoro_conv_adain.so"
-                ),
             ),
         )

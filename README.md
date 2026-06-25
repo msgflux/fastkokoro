@@ -6,11 +6,10 @@ Lightweight OpenAI-compatible Kokoro TTS server powered by ONNX Runtime.
 overhead, fast local inference, and a small dependency footprint. It supports CPU
 and GPU execution through ONNX Runtime providers, including CUDA, TensorRT, and
 other providers when the matching runtime package is installed. The default
-model is NVIDIA's optimized ONNX export: `nvidia/kokoro-82M-onnx-opt`.
+model is the fixed-bucket streaming export:
+`msgflux/Kokoro-82M-streaming-onnx`.
 
-The NVIDIA repo's `voices.bin` uses a raw float32 layout. `fastkokoro` converts it
-once into the internal `.npz` voice format used by `fastkokoro`, so the default model
-and voices both come from `nvidia/kokoro-82M-onnx-opt`.
+The default checkpoint is `onnx/kokoro-82m-streaming-b24-fp16.onnx`.
 
 ## Demo
 
@@ -72,18 +71,6 @@ Run the server from source:
 uv run fastkokoro
 ```
 
-Enable experimental TTFC multi-shape warmup from CLI:
-
-```bash
-uv run fastkokoro --warmup-multi-shape
-```
-
-Or provide custom buckets:
-
-```bash
-uv run fastkokoro --warmup-multi-shape-buckets 6,8,9,10,11,12,16,24
-```
-
 For GPU development environments, use the GPU extra instead:
 
 ```bash
@@ -104,6 +91,13 @@ Use the published GPU image with NVIDIA Container Toolkit:
 docker run --gpus all -p 8880:8880 msgflux/fastkokoro:gpu
 ```
 
+Use the TensorRT image when the host has a compatible NVIDIA driver and you want
+TensorRT engine caching:
+
+```bash
+docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models msgflux/fastkokoro:tensorrt
+```
+
 Published tags:
 
 | Tag | Description |
@@ -113,23 +107,27 @@ Published tags:
 | `gpu-cuda12.6-cudnn9`, `latest-gpu-cuda12.6-cudnn9` | Latest CUDA 12.6/cuDNN9 GPU image |
 | `gpu-legacy`, `latest-gpu-legacy` | Alias for the CUDA 11.8/cuDNN8 GPU image |
 | `gpu-cuda11.8-cudnn8`, `latest-gpu-cuda11.8-cudnn8` | Latest CUDA 11.8/cuDNN8 GPU image |
-| `0.2.0-cpu`, `0.2-cpu` | Versioned CPU image |
-| `0.2.0-gpu`, `0.2-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
-| `0.2.0-gpu-cuda12.6-cudnn9`, `0.2-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
-| `0.2.0-gpu-legacy`, `0.2-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
-| `0.2.0-gpu-cuda11.8-cudnn8`, `0.2-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
+| `tensorrt`, `latest-tensorrt` | Alias for the latest TensorRT image |
+| `tensorrt-25.06`, `latest-tensorrt-25.06` | TensorRT 25.06 image with ONNX Runtime 1.22 |
+| `0.3.0-cpu`, `0.3-cpu` | Versioned CPU image |
+| `0.3.0-gpu`, `0.3-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
+| `0.3.0-gpu-cuda12.6-cudnn9`, `0.3-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
+| `0.3.0-gpu-legacy`, `0.3-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
+| `0.3.0-gpu-cuda11.8-cudnn8`, `0.3-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
+| `0.3.0-tensorrt`, `0.3-tensorrt` | Versioned TensorRT image alias |
+| `0.3.0-tensorrt-25.06`, `0.3-tensorrt-25.06` | Versioned TensorRT 25.06 image |
 
 Build and run the CPU image locally:
 
 ```bash
-docker build -f Dockerfile.cpu -t fastkokoro:cpu .
+docker build -f docker/Dockerfile.cpu -t fastkokoro:cpu .
 docker run -p 8880:8880 fastkokoro:cpu
 ```
 
 Build and run the GPU image locally:
 
 ```bash
-docker build -f Dockerfile.gpu -t fastkokoro:gpu .
+docker build -f docker/Dockerfile.gpu -t fastkokoro:gpu .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu
 ```
 
@@ -137,9 +135,36 @@ For older NVIDIA drivers or GPUs that do not work with the current CUDA 12
 image, build the CUDA 11.8/cuDNN8 legacy image:
 
 ```bash
-docker build -f Dockerfile.gpu-legacy -t fastkokoro:gpu-legacy .
+docker build -f docker/Dockerfile.gpu-legacy -t fastkokoro:gpu-legacy .
 docker run --gpus all -p 8880:8880 fastkokoro:gpu-legacy
 ```
+
+Build and run the TensorRT image locally:
+
+```bash
+docker build -f docker/Dockerfile.tensorrt -t fastkokoro:tensorrt .
+docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models fastkokoro:tensorrt
+```
+
+TensorRT builds an engine the first time it sees a model, bucket, GPU
+architecture, and provider option set. Keep `/models` mounted so
+`/models/trt-cache` persists; otherwise startup will pay the TensorRT engine
+build cost again.
+
+The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
+published only through the TensorRT 25.06 image. Current Python 3.12 ONNX
+Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
+
+Local server measurements on a GTX 1650 (SM75), using the b24 streaming model,
+engine cache enabled, `response_format=pcm`, and HTTP streaming:
+
+| Scenario | Provider | TTFC p50 |
+| --- | --- | ---: |
+| Short and medium streaming chunks | TensorRT EP | 40.9 ms |
+| Short and medium streaming chunks | CUDA EP | 181.7 ms |
+
+These numbers exclude first-time TensorRT engine build. On the same host, first
+engine build took minutes; persist `/models/trt-cache` for production.
 
 Environment variables:
 
@@ -147,16 +172,17 @@ Environment variables:
 | --- | --- |
 | `FASTKOKORO_HOST` | `0.0.0.0` |
 | `FASTKOKORO_PORT` | `8880` |
-| `FASTKOKORO_MODEL_REPO` | `nvidia/kokoro-82M-onnx-opt` |
-| `FASTKOKORO_MODEL_FILE` | `kokoro-82m-v1.0.onnx` |
+| `FASTKOKORO_MODEL_REPO` | `msgflux/Kokoro-82M-streaming-onnx` |
+| `FASTKOKORO_MODEL_FILE` | `onnx/kokoro-82m-streaming-b24-fp16.onnx` |
 | `FASTKOKORO_MODEL_PATH` | unset; downloads from Hugging Face |
-| `FASTKOKORO_VOICES_FILE` | `voices.bin` |
+| `FASTKOKORO_VOICES_FILE` | `voices.npz` |
 | `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
-| `FASTKOKORO_VOICES_PATH` | unset; downloads and converts NVIDIA voices |
+| `FASTKOKORO_VOICES_PATH` | unset; downloads from Hugging Face |
 | `FASTKOKORO_DEFAULT_VOICE` | `af_heart` |
 | `FASTKOKORO_DEFAULT_LANG` | `en-us` |
 | `FASTKOKORO_WARMUP` | `true` |
-| `FASTKOKORO_WARMUP_TEXT` | `hello` |
+| `FASTKOKORO_WARMUP_TEXT` | `Hello there. This is a warmup request for streaming speech generation.` |
+| `FASTKOKORO_WARMUP_REQUEST` | `false` |
 | `FASTKOKORO_STREAM_STRATEGY` | `adaptive` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `32` |
@@ -174,15 +200,14 @@ Environment variables:
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_BLOCK_SIZE` | `128` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_ACCURACY_LEVEL` | `4` |
 | `FASTKOKORO_ONNX_WEIGHT_ONLY_SYMMETRIC` | `true` |
-| `FASTKOKORO_WARMUP_MULTI_SHAPE` | `false` |
-| `FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` | `6,8,9,10,11,12,16,24` |
 | `FASTKOKORO_JIT` | `true` |
+| `FASTKOKORO_PROFILE` | `false` |
+| `FASTKOKORO_PROFILE_DIR` | `FASTKOKORO_CACHE_DIR/profiles` |
+| `FASTKOKORO_PROFILE_WARMUP` | `false` unless `FASTKOKORO_PROFILE=true` |
+| `FASTKOKORO_PROFILE_REQUESTS` | `false` unless `FASTKOKORO_PROFILE=true` |
 | `FASTKOKORO_ONNX_ADAIN_FUSION` | `false` |
 | `FASTKOKORO_ONNX_ADAIN_MODEL_PATH` | unset; generated under cache |
 | `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` | unset |
-| `FASTKOKORO_ONNX_CONV_ADAIN_FUSION` | `false` |
-| `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` | unset; generated under cache |
-| `FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` | unset |
 | `FASTKOKORO_CORS_ALLOW_ORIGINS` | `*` |
 | `FASTKOKORO_CORS_ALLOW_METHODS` | `GET,POST,OPTIONS` |
 | `FASTKOKORO_CORS_ALLOW_HEADERS` | `*` |
@@ -192,24 +217,40 @@ Environment variables:
 server take a little longer to become ready, but avoids paying most of the first
 request latency on the first user request.
 
-Set `FASTKOKORO_WARMUP_MULTI_SHAPE=true` to enable experimental multi-shape ONNX
-warmup focused on first chunk latency. The server runs one pass per bucket from
-`FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS` without changing request shapes at
-runtime.
+Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
+the same streaming speech endpoint flow and consume the first chunk.
+
+The default b24 streaming model is the balanced option for low TTFC without
+over-fragmenting medium text. For minimum TTFC, use b16; for larger chunks, use
+b32 or b48:
+
+```bash
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b16-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b24-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b32-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b48-fp16.onnx
+```
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
 serving requests. Set `FASTKOKORO_JIT=false` to force the NumPy path.
 
-`FASTKOKORO_STREAM_STRATEGY=chunk` streams by splitting on punctuation when
-possible while also enforcing `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
-`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS`. The default is intentionally small, up to
-2 words or 32 characters per model call, to favor low TTFC for interactive
-clients. `phrase` splits only on phrase punctuation such as commas, semicolons,
-and question marks. `sentence` synthesizes one sentence at a time. For
-`response_format=pcm`, the server also slices each generated segment into
-smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
-`FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
+Enable built-in profiling with `FASTKOKORO_PROFILE=true` to write `cProfile` artifacts for
+startup warmup and speech requests under `FASTKOKORO_PROFILE_DIR`. Each run produces a
+raw `.prof` file plus a `.txt` summary sorted by cumulative time. Use
+`FASTKOKORO_PROFILE_WARMUP` and `FASTKOKORO_PROFILE_REQUESTS` to narrow profiling to
+startup or request handling when debugging TTFC regressions.
+
+`FASTKOKORO_STREAM_STRATEGY=adaptive` is the default. It keeps short sentences
+intact for more natural prosody, and uses scheduled word-boundary chunks for
+longer sentences to keep TTFC bounded. Set `FASTKOKORO_STREAM_STRATEGY=chunk`
+for minimum TTFC; this enforces `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
+`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` from the first segment, trading continuity
+for lower first audio latency. `phrase` splits only on phrase punctuation such
+as commas, semicolons, and question marks. `sentence` synthesizes one sentence
+at a time. For `response_format=pcm`, the server also slices each generated
+segment into smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`.
+Set `FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
 uses the local fastkokoro synthesis path instead of the upstream engine.
 
 Inline pause tokens can be embedded in input text. `[pause:1.5s]` inserts 1.5
@@ -237,42 +278,17 @@ rewrites generator AdaIN subgraphs into a native custom op. It requires
 `fastkokoro` generates and caches an AdaIN-fused ONNX model under
 `FASTKOKORO_CACHE_DIR/onnx`.
 
-Build and enable the custom op on the target machine with the server flag:
+Build the custom op on the target machine with:
 
 ```bash
-FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-custom-op
+uv run python scripts/build_adain_op.py --print-env
 ```
 
-The flag writes the native library under `FASTKOKORO_CACHE_DIR/native` by
-default, enables AdaIN fusion for the process, and points
-`FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` at the compiled library. Use
-`--custom-op-output /path/libfastkokoro_adain.so` to choose a specific path.
-For manual builds without starting the server, run
-`uv run fastkokoro-build-adain-op --print-env`.
-
-Set `FASTKOKORO_ONNX_CONV_ADAIN_FUSION=true` to use the experimental CPU-only
-`Conv1dAdaIn` custom op optimization. This rewrites generator `Conv -> AdaIN`
-subgraphs into a fused native custom op and can reduce CPU latency in the
-decoder path. It requires `FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider` and
-`FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY` pointing to a compiled
-`libfastkokoro_conv_adain.so`. If `FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH` is
-unset, `fastkokoro` generates and caches a ConvAdaIN-fused ONNX model under
-`FASTKOKORO_CACHE_DIR/onnx`.
-
-Build and enable the ConvAdaIN custom op on the target machine with:
-
-```bash
-FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider uv run fastkokoro --build-conv-custom-op
-```
-
-Or build it manually without starting the server:
-
-```bash
-uv run fastkokoro-build-conv-adain-op --print-env
-```
-
-This path is highly hardware-dependent and may regress latency on some CPUs.
-Always benchmark against the baseline before enabling it in production.
+The script writes the native library under `FASTKOKORO_CACHE_DIR/native` by
+default and prints the `FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY` export line.
+Set `FASTKOKORO_ONNX_ADAIN_FUSION=true` and
+`FASTKOKORO_ONNX_PROVIDERS=CPUExecutionProvider` when starting the server if you
+want to enable the CPU custom op.
 
 Restrict CORS by setting one or more allowed origins:
 
@@ -301,6 +317,12 @@ TensorRT with CUDA and CPU fallback:
 
 ```bash
 FASTKOKORO_ONNX_PROVIDERS=TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider uv run fastkokoro
+```
+
+Recommended TensorRT provider options:
+
+```bash
+FASTKOKORO_ONNX_PROVIDER_OPTIONS='{"TensorrtExecutionProvider":{"trt_engine_cache_enable":"True","trt_engine_cache_path":"/models/trt-cache","trt_timing_cache_enable":"True","trt_timing_cache_path":"/models/trt-cache"}}'
 ```
 
 Provider options can be passed as JSON keyed by provider name. For example,

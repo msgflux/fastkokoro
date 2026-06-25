@@ -1,13 +1,15 @@
 from fastkokoro.config import (
     DEFAULT_JIT,
     DEFAULT_ONNX_ADAIN_FUSION,
-    DEFAULT_ONNX_CONV_ADAIN_FUSION,
     DEFAULT_ONNX_GRAPH_OPTIMIZATION_LEVEL,
     DEFAULT_ONNX_INTRA_OP_NUM_THREADS,
     DEFAULT_ONNX_IO_BINDING,
     DEFAULT_ONNX_IO_BINDING_DEVICE,
-    DEFAULT_ONNX_TTFC_SHAPE_BUCKETS,
-    DEFAULT_WARMUP_MULTI_SHAPE,
+    DEFAULT_ONNX_TTFC_MODEL_PATH,
+    DEFAULT_PROFILE,
+    DEFAULT_RUNTIME_TAIL_FADE_MS,
+    DEFAULT_RUNTIME_TAIL_TRIM_MS,
+    DEFAULT_WARMUP_TEXT,
     Settings,
 )
 
@@ -36,12 +38,6 @@ def test_settings_parses_onnx_providers(monkeypatch):
         "FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY",
         "/tmp/libfastkokoro_adain.so",
     )
-    monkeypatch.setenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION", "true")
-    monkeypatch.setenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", "/tmp/conv_adain.onnx")
-    monkeypatch.setenv(
-        "FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY",
-        "/tmp/libfastkokoro_conv_adain.so",
-    )
     monkeypatch.setenv("FASTKOKORO_ONNX_LOG_SEVERITY_LEVEL", "2")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS", "40")
     monkeypatch.setenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS", "6")
@@ -49,9 +45,15 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_STREAM_SCHEDULE_MAX_SEGMENT_WORDS", "10")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS", "56")
     monkeypatch.setenv("FASTKOKORO_STREAM_CPU_SCHEDULE_MAX_SEGMENT_WORDS", "4")
-    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE", "true")
-    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,6,8,16")
+    monkeypatch.setenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH", "/tmp/ttfc.onnx")
     monkeypatch.setenv("FASTKOKORO_JIT", "false")
+    monkeypatch.setenv("FASTKOKORO_WARMUP_REQUEST", "true")
+    monkeypatch.setenv("FASTKOKORO_RUNTIME_TAIL_TRIM_MS", "120")
+    monkeypatch.setenv("FASTKOKORO_RUNTIME_TAIL_FADE_MS", "48")
+    monkeypatch.setenv("FASTKOKORO_PROFILE", "true")
+    monkeypatch.setenv("FASTKOKORO_PROFILE_DIR", "/tmp/profiles")
+    monkeypatch.setenv("FASTKOKORO_PROFILE_WARMUP", "false")
+    monkeypatch.setenv("FASTKOKORO_PROFILE_REQUESTS", "true")
 
     settings = Settings.from_env()
 
@@ -74,12 +76,6 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.onnx_adain_fusion is True
     assert str(settings.onnx_adain_model_path) == "/tmp/adain.onnx"
     assert str(settings.onnx_adain_custom_op_library) == "/tmp/libfastkokoro_adain.so"
-    assert settings.onnx_conv_adain_fusion is True
-    assert str(settings.onnx_conv_adain_model_path) == "/tmp/conv_adain.onnx"
-    assert (
-        str(settings.onnx_conv_adain_custom_op_library)
-        == "/tmp/libfastkokoro_conv_adain.so"
-    )
     assert settings.onnx_log_severity_level == 2
     assert settings.stream_max_segment_chars == 40
     assert settings.stream_max_segment_words == 6
@@ -87,9 +83,15 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.stream_schedule_max_segment_words == 10
     assert settings.stream_cpu_schedule_max_segment_chars == 56
     assert settings.stream_cpu_schedule_max_segment_words == 4
-    assert settings.warmup_multi_shape is True
-    assert settings.onnx_ttfc_shape_buckets == (6, 8, 16)
+    assert str(settings.onnx_ttfc_model_path) == "/tmp/ttfc.onnx"
     assert settings.jit is False
+    assert settings.warmup_request is True
+    assert settings.runtime_tail_trim_ms == 120
+    assert settings.runtime_tail_fade_ms == 48
+    assert settings.profile is True
+    assert str(settings.profile_dir) == "/tmp/profiles"
+    assert settings.profile_warmup is False
+    assert settings.profile_requests is True
 
 
 def test_settings_defaults_to_cpu_provider(monkeypatch):
@@ -99,12 +101,8 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_FUSION", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_FUSION", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_MODEL_PATH", raising=False)
-    monkeypatch.delenv("FASTKOKORO_ONNX_CONV_ADAIN_CUSTOM_OP_LIBRARY", raising=False)
     monkeypatch.delenv("FASTKOKORO_ONNX_PROVIDER_OPTIONS", raising=False)
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE", raising=False)
-    monkeypatch.delenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", raising=False)
+    monkeypatch.delenv("FASTKOKORO_ONNX_TTFC_MODEL_PATH", raising=False)
     monkeypatch.delenv("FASTKOKORO_CORS_ALLOW_ORIGINS", raising=False)
 
     settings = Settings.from_env()
@@ -124,17 +122,24 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_fusion == DEFAULT_ONNX_ADAIN_FUSION
     assert settings.onnx_adain_model_path is None
     assert settings.onnx_adain_custom_op_library is None
-    assert settings.onnx_conv_adain_fusion == DEFAULT_ONNX_CONV_ADAIN_FUSION
-    assert settings.onnx_conv_adain_model_path is None
-    assert settings.onnx_conv_adain_custom_op_library is None
-    assert settings.warmup_multi_shape == DEFAULT_WARMUP_MULTI_SHAPE
-    assert settings.onnx_ttfc_shape_buckets == DEFAULT_ONNX_TTFC_SHAPE_BUCKETS
+    assert settings.model_repo == "msgflux/Kokoro-82M-streaming-onnx"
+    assert settings.model_file == "onnx/kokoro-82m-streaming-b24-fp16.onnx"
+    assert settings.voices_file == "voices.npz"
+    assert settings.warmup_text == DEFAULT_WARMUP_TEXT
+    assert settings.onnx_ttfc_model_path == DEFAULT_ONNX_TTFC_MODEL_PATH
     assert settings.jit == DEFAULT_JIT
+    assert settings.warmup_request is False
+    assert settings.runtime_tail_trim_ms == DEFAULT_RUNTIME_TAIL_TRIM_MS
+    assert settings.runtime_tail_fade_ms == DEFAULT_RUNTIME_TAIL_FADE_MS
+    assert settings.profile is DEFAULT_PROFILE
+    assert settings.profile_warmup is DEFAULT_PROFILE
+    assert settings.profile_requests is DEFAULT_PROFILE
+    assert settings.profile_dir == settings.cache_dir / "profiles"
     assert settings.stream_strategy == "adaptive"
     assert settings.stream_adaptive_max_chars == 50
     assert settings.stream_adaptive_cpu_max_chars == 12
-    assert settings.stream_max_segment_chars == 32
-    assert settings.stream_max_segment_words == 2
+    assert settings.stream_max_segment_chars == 8
+    assert settings.stream_max_segment_words == 1
     assert settings.stream_schedule_max_segment_chars == 96
     assert settings.stream_schedule_max_segment_words == 12
     assert settings.stream_cpu_schedule_max_segment_chars == 48
@@ -225,17 +230,6 @@ def test_settings_rejects_invalid_weight_only_nbits(monkeypatch):
         raise AssertionError("expected invalid weight-only nbits to fail")
 
 
-def test_settings_rejects_invalid_ttfc_shape_buckets(monkeypatch):
-    monkeypatch.setenv("FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS", "8,0,16")
-
-    try:
-        Settings.from_env()
-    except ValueError as exc:
-        assert "FASTKOKORO_WARMUP_MULTI_SHAPE_BUCKETS" in str(exc)
-    else:
-        raise AssertionError("expected invalid ttfc shape buckets to fail")
-
-
 def test_settings_parses_cors(monkeypatch):
     monkeypatch.setenv(
         "FASTKOKORO_CORS_ALLOW_ORIGINS",
@@ -254,3 +248,14 @@ def test_settings_parses_cors(monkeypatch):
     assert settings.cors_allow_methods == ("GET", "POST")
     assert settings.cors_allow_headers == ("Authorization", "Content-Type")
     assert settings.cors_allow_credentials is True
+
+
+def test_settings_profile_subflags_default_to_master_switch(monkeypatch):
+    monkeypatch.setenv("FASTKOKORO_WARMUP_REQUEST", "true")
+    monkeypatch.setenv("FASTKOKORO_PROFILE", "true")
+
+    settings = Settings.from_env()
+
+    assert settings.profile is True
+    assert settings.profile_warmup is True
+    assert settings.profile_requests is True

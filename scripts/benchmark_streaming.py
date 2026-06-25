@@ -17,22 +17,7 @@ from fastkokoro.streaming import (
     split_scheduled_chunks,
     split_sentences,
 )
-
-TEXTS = {
-    "short": "Ola, tudo bem?",
-    "medium": (
-        "Ola, tudo bem? Este e um teste de sintese de voz em portugues brasileiro. "
-        "Estamos medindo a latencia ate o primeiro chunk e o tempo total de geracao."
-    ),
-    "long": (
-        "Ola, tudo bem? Este e um teste de sintese de voz em portugues brasileiro. "
-        "Estamos medindo a latencia ate o primeiro chunk e o tempo total de geracao. "
-        "Para streaming em uma interface de terminal, o ideal e entregar audio cedo, "
-        "sem esperar o texto inteiro ser processado. Por isso este benchmark compara "
-        "a estrategia atual do kokoro onnx com alternativas baseadas em segmentacao "
-        "de sentencas e frames de audio no lado do servidor."
-    ),
-}
+from scripts.benchmark_corpus import corpus_choices, get_texts
 
 
 @dataclass
@@ -52,7 +37,7 @@ async def main() -> None:
     parser.add_argument("--voice", default="pf_dora")
     parser.add_argument("--lang", default="p")
     parser.add_argument("--speed", type=float, default=1.0)
-    parser.add_argument("--text", choices=TEXTS, default=None)
+    parser.add_argument("--text", choices=corpus_choices(), default=None)
     parser.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--audio-frame-ms", type=int, default=200)
     parser.add_argument("--json-array", action="store_true")
@@ -62,74 +47,82 @@ async def main() -> None:
     if args.warmup:
         engine.warmup()
 
-    selected_texts = {args.text: TEXTS[args.text]} if args.text else TEXTS
+    selected_texts = (
+        {args.text: get_texts(args.text)}
+        if args.text
+        else {name: get_texts(name) for name in corpus_choices()}
+    )
     results = []
-    for text_name, text in selected_texts.items():
-        measurements = (
-            await measure(
-                "kokoro_create_stream",
-                text_name,
-                text,
-                kokoro_create_stream(engine, text, args.voice, args.lang, args.speed),
-                engine,
-            ),
-            await measure(
-                "sentence_segments",
-                text_name,
-                text,
-                sentence_segment_stream(
-                    engine, text, args.voice, args.lang, args.speed
-                ),
-                engine,
-            ),
-            await measure(
-                f"phrase_segments_{args.audio_frame_ms}ms_frames",
-                text_name,
-                text,
-                framed_phrase_segment_stream(
-                    engine,
+    for text_name, texts in selected_texts.items():
+        for variant_index, text in enumerate(texts, start=1):
+            variant_name = f"{text_name}:{variant_index}"
+            measurements = (
+                await measure(
+                    "kokoro_create_stream",
+                    variant_name,
                     text,
-                    args.voice,
-                    args.lang,
-                    args.speed,
-                    args.audio_frame_ms,
-                ),
-                engine,
-            ),
-            await measure(
-                f"chunk_segments_{args.audio_frame_ms}ms_frames",
-                text_name,
-                text,
-                framed_chunk_segment_stream(
+                    kokoro_create_stream(
+                        engine, text, args.voice, args.lang, args.speed
+                    ),
                     engine,
-                    text,
-                    args.voice,
-                    args.lang,
-                    args.speed,
-                    args.audio_frame_ms,
                 ),
-                engine,
-            ),
-            await measure(
-                f"sentence_segments_{args.audio_frame_ms}ms_frames",
-                text_name,
-                text,
-                framed_sentence_segment_stream(
+                await measure(
+                    "sentence_segments",
+                    variant_name,
+                    text,
+                    sentence_segment_stream(
+                        engine, text, args.voice, args.lang, args.speed
+                    ),
                     engine,
-                    text,
-                    args.voice,
-                    args.lang,
-                    args.speed,
-                    args.audio_frame_ms,
                 ),
-                engine,
-            ),
-        )
-        for result in measurements:
-            if args.json_array:
-                results.append(result)
-            else:
-                print(json.dumps(asdict(result)), flush=True)
+                await measure(
+                    f"phrase_segments_{args.audio_frame_ms}ms_frames",
+                    variant_name,
+                    text,
+                    framed_phrase_segment_stream(
+                        engine,
+                        text,
+                        args.voice,
+                        args.lang,
+                        args.speed,
+                        args.audio_frame_ms,
+                    ),
+                    engine,
+                ),
+                await measure(
+                    f"chunk_segments_{args.audio_frame_ms}ms_frames",
+                    variant_name,
+                    text,
+                    framed_chunk_segment_stream(
+                        engine,
+                        text,
+                        args.voice,
+                        args.lang,
+                        args.speed,
+                        args.audio_frame_ms,
+                    ),
+                    engine,
+                ),
+                await measure(
+                    f"sentence_segments_{args.audio_frame_ms}ms_frames",
+                    variant_name,
+                    text,
+                    framed_sentence_segment_stream(
+                        engine,
+                        text,
+                        args.voice,
+                        args.lang,
+                        args.speed,
+                        args.audio_frame_ms,
+                    ),
+                    engine,
+                ),
+            )
+            for result in measurements:
+                if args.json_array:
+                    results.append(result)
+                else:
+                    print(json.dumps(asdict(result)), flush=True)
 
     if args.json_array:
         print(json.dumps([asdict(result) for result in results], indent=2))

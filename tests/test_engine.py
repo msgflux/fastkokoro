@@ -7,7 +7,7 @@ import pytest
 
 import fastkokoro.engine as engine_module
 from fastkokoro.config import Settings
-from fastkokoro.engine import FastKokoro, split_phonemes_for_model
+from fastkokoro.engine import FastKokoro, OnnxSessionProfile, split_phonemes_for_model
 
 
 class FakeOrtValue:
@@ -54,14 +54,19 @@ def _settings(**overrides):
         onnx_adain_fusion=False,
         onnx_adain_model_path=None,
         onnx_adain_custom_op_library=None,
-        onnx_conv_adain_fusion=False,
-        onnx_conv_adain_model_path=None,
-        onnx_conv_adain_custom_op_library=None,
-        warmup_multi_shape=False,
-        onnx_ttfc_shape_buckets=(6, 8, 9, 10, 11, 12, 16, 24),
+        onnx_ttfc_model_path=None,
         jit=False,
         warmup=False,
-        warmup_text="hello",
+        warmup_text=(
+            "Hello there. This is a warmup request for streaming speech generation."
+        ),
+        warmup_request=False,
+        runtime_tail_trim_ms=150,
+        runtime_tail_fade_ms=72,
+        profile=False,
+        profile_dir=Path("/tmp/cache/profiles"),
+        profile_warmup=False,
+        profile_requests=False,
         stream_strategy="sentence",
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
@@ -120,6 +125,8 @@ def _engine(settings):
         get_outputs=lambda: [SimpleNamespace(name="audio")],
         run=lambda output_names, inputs: [np.ones(48, dtype=np.float32)],
     )
+    engine.ttfc_session = None
+    engine._ttfc_onnx_profile = None
     engine.kokoro = FakeKokoro()
     engine._voices = tuple(engine.kokoro.get_voices())
     engine._voice_set = frozenset(engine._voices)
@@ -132,6 +139,14 @@ def _engine(settings):
     engine._onnx_output_name = engine.session.get_outputs()[0].name
     engine._token_input_name = (
         "input_ids" if "input_ids" in engine._onnx_input_names else "tokens"
+    )
+    engine._token_input_width = 512
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name=engine._onnx_output_name,
+        token_input_name=engine._token_input_name,
+        token_input_width=engine._token_input_width,
+        token_input_static=False,
     )
     engine._onnx_input_buffers = local()
     engine._output_buffers = local()
@@ -387,29 +402,215 @@ async def test_stream_inserts_pause_silence():
     assert [len(chunk) for chunk in chunks] == [48, 48, 48, 48, 48]
 
 
-def test_warm_ttfc_shape_buckets_runs_selected_shapes():
-    runs = []
+@pytest.mark.asyncio
+async def test_stream_first_audio_segment_uses_ttfc_session():
     engine = _engine(
         _settings(
-            warmup_multi_shape=True,
-            onnx_ttfc_shape_buckets=(6, 8),
+            stream_strategy="chunk",
+            stream_audio_frame_ms=1,
+            stream_max_segment_words=1,
+            stream_cpu_schedule_max_segment_words=1,
         )
     )
+    ttfc_session = SimpleNamespace(name="ttfc")
+    sessions = []
 
-    def run(output_names, inputs):
-        runs.append(inputs["tokens"].shape[1])
-        return [np.ones(48, dtype=np.float32)]
+    def run_onnx(phonemes, voice, speed, *, session=None):
+        sessions.append(session)
+        return np.ones(24, dtype=np.float32)
 
-    engine.session = SimpleNamespace(
-        get_providers=lambda: ["CPUExecutionProvider"],
-        run=run,
+    engine.ttfc_session = ttfc_session
+    engine._run_onnx_audio = run_onnx
+
+    chunks = [
+        chunk
+        async for chunk in engine.create_stream(
+            "Hello world",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert chunks
+    assert sessions == [ttfc_session, None]
+
+
+def test_build_onnx_inputs_keeps_dynamic_model_at_real_token_length():
+    engine = _engine(_settings())
+
+    inputs = engine._build_onnx_inputs(
+        [10, 20, 30],
+        engine._voice_styles["af_heart"],
+        1.0,
     )
 
-    engine._warm_ttfc_shape_buckets()
+    assert inputs["tokens"].shape == (1, 5)
+    assert "attention_mask" not in inputs
+    np.testing.assert_array_equal(
+        inputs["tokens"],
+        np.array([[0, 10, 20, 30, 0]], dtype=np.int64),
+    )
 
-    assert 6 in runs
-    assert 8 in runs
-    assert len(runs) >= 2
+
+def test_build_onnx_inputs_pads_fixed_attention_mask_model():
+    engine = _engine(_settings())
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        get_inputs=lambda: [
+            SimpleNamespace(name="input_ids", shape=[1, 8]),
+            SimpleNamespace(name="attention_mask", shape=[1, 8]),
+        ],
+        get_outputs=lambda: [SimpleNamespace(name="audio")],
+        run=lambda output_names, inputs: [np.ones(48, dtype=np.float32)],
+    )
+    engine._onnx_input_names = frozenset(
+        item.name for item in engine.session.get_inputs()
+    )
+    engine._token_input_name = "input_ids"
+    engine._token_input_width = 8
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name="audio",
+        token_input_name=engine._token_input_name,
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
+    )
+
+    inputs = engine._build_onnx_inputs(
+        [10, 20, 30],
+        engine._voice_styles["af_heart"],
+        1.0,
+    )
+
+    assert inputs["input_ids"].shape == (1, 8)
+    assert inputs["attention_mask"].shape == (1, 8)
+    np.testing.assert_array_equal(
+        inputs["input_ids"],
+        np.array([[0, 10, 20, 30, 0, 0, 0, 0]], dtype=np.int64),
+    )
+    np.testing.assert_array_equal(
+        inputs["attention_mask"],
+        np.array([[1, 1, 1, 1, 1, 0, 0, 0]], dtype=np.int64),
+    )
+
+
+def test_build_onnx_inputs_pads_fixed_model_without_attention_mask():
+    engine = _engine(_settings())
+    engine._onnx_input_names = frozenset(
+        {"input_ids", "style", "speed", "input_lengths"}
+    )
+    engine._token_input_name = "input_ids"
+    engine._token_input_width = 8
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name="audio",
+        token_input_name=engine._token_input_name,
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
+    )
+
+    inputs = engine._build_onnx_inputs(
+        [10, 20, 30],
+        engine._voice_styles["af_heart"],
+        1.0,
+    )
+
+    assert inputs["input_ids"].shape == (1, 8)
+    assert inputs["input_lengths"].shape == (1,)
+    assert inputs["speed"].dtype == np.float32
+    assert "attention_mask" not in inputs
+    np.testing.assert_array_equal(
+        inputs["input_ids"],
+        np.array([[0, 10, 20, 30, 0, 0, 0, 0]], dtype=np.int64),
+    )
+    np.testing.assert_array_equal(
+        inputs["input_lengths"],
+        np.array([5], dtype=np.int64),
+    )
+
+
+def test_build_onnx_inputs_uses_ttfc_session_profile():
+    engine = _engine(_settings())
+    ttfc_session = SimpleNamespace(name="ttfc")
+    engine.ttfc_session = ttfc_session
+    engine._ttfc_onnx_profile = OnnxSessionProfile(
+        input_names=frozenset({"input_ids", "style", "speed", "attention_mask"}),
+        output_name="audio",
+        token_input_name="input_ids",
+        token_input_width=8,
+        token_input_static=True,
+    )
+
+    inputs = engine._build_onnx_inputs(
+        [10, 20, 30],
+        engine._voice_styles["af_heart"],
+        1.0,
+        profile=engine._onnx_profile_for_session(ttfc_session),
+    )
+
+    assert inputs["input_ids"].shape == (1, 8)
+    assert inputs["attention_mask"].shape == (1, 8)
+    assert "tokens" not in inputs
+
+
+def test_split_for_onnx_token_width_preserves_dynamic_model_batches():
+    engine = _engine(_settings())
+
+    assert engine._split_for_onnx_token_width("hello world") == ["hello world"]
+
+
+def test_split_for_onnx_token_width_uses_fixed_mask_width():
+    engine = _engine(_settings())
+    engine._onnx_input_names = frozenset({"tokens", "attention_mask"})
+    engine._token_input_width = 7
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name="audio",
+        token_input_name="tokens",
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
+    )
+
+    assert engine._split_for_onnx_token_width("one two three") == [
+        "one",
+        "two",
+        "three",
+    ]
+
+
+def test_split_for_onnx_token_width_uses_fixed_width_without_attention_mask():
+    engine = _engine(_settings())
+    engine._onnx_input_names = frozenset({"input_ids"})
+    engine._token_input_width = 7
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name="audio",
+        token_input_name="input_ids",
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
+    )
+
+    assert engine._split_for_onnx_token_width("one two three") == [
+        "one",
+        "two",
+        "three",
+    ]
+
+
+def test_split_for_onnx_token_width_splits_oversized_piece():
+    engine = _engine(_settings())
+    engine._onnx_input_names = frozenset({"tokens", "attention_mask"})
+    engine._token_input_width = 5
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name="audio",
+        token_input_name="tokens",
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
+    )
+
+    assert engine._split_for_onnx_token_width("abcdef") == ["abc", "def"]
 
 
 def test_create_samples_with_buffer_pool_grows_and_merges(monkeypatch):

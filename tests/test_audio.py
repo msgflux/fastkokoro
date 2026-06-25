@@ -1,6 +1,6 @@
 import numpy as np
 
-from fastkokoro.audio import encode_audio, trim_audio_part
+from fastkokoro.audio import encode_audio, trim_audio_part, trim_audio_tail
 
 
 def test_encode_audio_pcm_numpy_path_matches_expected():
@@ -42,3 +42,22 @@ def test_trim_audio_part_numpy_path_uses_kokoro_trim():
     trimmed = trim_audio_part(samples, use_jit=False)
 
     assert len(trimmed) > 0
+
+
+def test_trim_audio_tail_removes_tail_and_fades_boundary():
+    samples = np.ones(240, dtype=np.float32)
+
+    trimmed = trim_audio_tail(samples, sample_rate=1000, trim_ms=40, fade_ms=10)
+
+    assert trimmed.shape == (200,)
+    assert trimmed[-1] == 0.0
+    assert 0.0 < trimmed[-5] < 1.0
+
+
+def test_trim_audio_tail_disabled_returns_float32_view():
+    samples = np.ones(10, dtype=np.float64)
+
+    trimmed = trim_audio_tail(samples, sample_rate=1000, trim_ms=0, fade_ms=10)
+
+    assert trimmed.dtype == np.float32
+    np.testing.assert_array_equal(trimmed, np.ones(10, dtype=np.float32))
