@@ -138,8 +138,8 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.stream_strategy == "adaptive"
     assert settings.stream_adaptive_max_chars == 50
     assert settings.stream_adaptive_cpu_max_chars == 12
-    assert settings.stream_max_segment_chars == 8
-    assert settings.stream_max_segment_words == 1
+    assert settings.stream_max_segment_chars == 24
+    assert settings.stream_max_segment_words == 2
     assert settings.stream_schedule_max_segment_chars == 96
     assert settings.stream_schedule_max_segment_words == 12
     assert settings.stream_cpu_schedule_max_segment_chars == 48
