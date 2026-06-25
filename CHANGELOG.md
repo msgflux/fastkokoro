@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-25
+
 ## [0.3.0] - 2026-06-05
 
 - Added low-latency streaming strategies, provider-aware scheduling, and
