@@ -92,10 +92,10 @@ docker run --gpus all -p 8880:8880 msgflux/fastkokoro:gpu
 ```
 
 Use the TensorRT image when the host has a compatible NVIDIA driver and you want
-TensorRT engine caching:
+TensorRT EP with engine caching:
 
 ```bash
-docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models msgflux/fastkokoro:tensorrt
+docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models msgflux/fastkokoro:0.4.0-tensorrt
 ```
 
 Published tags:
@@ -109,13 +109,13 @@ Published tags:
 | `gpu-cuda11.8-cudnn8`, `latest-gpu-cuda11.8-cudnn8` | Latest CUDA 11.8/cuDNN8 GPU image |
 | `tensorrt`, `latest-tensorrt` | Alias for the latest TensorRT image |
 | `tensorrt-25.06`, `latest-tensorrt-25.06` | TensorRT 25.06 image with ONNX Runtime 1.22 |
-| `0.3.0-cpu`, `0.3-cpu` | Versioned CPU image |
-| `0.3.0-gpu`, `0.3-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
-| `0.3.0-gpu-cuda12.6-cudnn9`, `0.3-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
-| `0.3.0-gpu-legacy`, `0.3-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
-| `0.3.0-gpu-cuda11.8-cudnn8`, `0.3-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
-| `0.3.0-tensorrt`, `0.3-tensorrt` | Versioned TensorRT image alias |
-| `0.3.0-tensorrt-25.06`, `0.3-tensorrt-25.06` | Versioned TensorRT 25.06 image |
+| `0.4.0-cpu`, `0.4-cpu` | Versioned CPU image |
+| `0.4.0-gpu`, `0.4-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
+| `0.4.0-gpu-cuda12.6-cudnn9`, `0.4-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
+| `0.4.0-gpu-legacy`, `0.4-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
+| `0.4.0-gpu-cuda11.8-cudnn8`, `0.4-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
+| `0.4.0-tensorrt`, `0.4-tensorrt` | Versioned TensorRT image alias |
+| `0.4.0-tensorrt-25.06`, `0.4-tensorrt-25.06` | Versioned TensorRT 25.06 image |
 
 Build and run the CPU image locally:
 
@@ -145,6 +145,11 @@ Build and run the TensorRT image locally:
 docker build -f docker/Dockerfile.tensorrt -t fastkokoro:tensorrt .
 docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models fastkokoro:tensorrt
 ```
+
+The TensorRT Dockerfile uses NVIDIA TensorRT 25.06 with ONNX Runtime GPU 1.22.x
+and defaults to `TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider`.
+The standard GPU image uses CUDA 12.6/cuDNN9, while `gpu-legacy` keeps the CUDA
+11.8/cuDNN8 build for older hosts.
 
 TensorRT builds an engine the first time it sees a model, bucket, GPU
 architecture, and provider option set. Keep `/models` mounted so
