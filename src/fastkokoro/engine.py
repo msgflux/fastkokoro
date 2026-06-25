@@ -16,6 +16,8 @@ except ModuleNotFoundError:
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part, trim_audio_tail
 from fastkokoro.config import (
+    DEFAULT_RUNTIME_TAIL_FADE_MS,
+    DEFAULT_RUNTIME_TAIL_TRIM_MS,
     DEFAULT_STREAM_MAX_SEGMENT_CHARS,
     DEFAULT_STREAM_MAX_SEGMENT_WORDS,
     Settings,
@@ -328,9 +330,23 @@ class FastKokoro:
         return trim_audio_tail(
             audio,
             sample_rate=SAMPLE_RATE,
-            trim_ms=self.settings.runtime_tail_trim_ms,
-            fade_ms=self.settings.runtime_tail_fade_ms,
+            trim_ms=self._runtime_tail_trim_ms(),
+            fade_ms=self._runtime_tail_fade_ms(),
         )
+
+    def _runtime_tail_trim_ms(self) -> int:
+        if self.settings.runtime_tail_trim_ms != DEFAULT_RUNTIME_TAIL_TRIM_MS:
+            return self.settings.runtime_tail_trim_ms
+        if self._token_input_width >= 48:
+            return 220
+        return self.settings.runtime_tail_trim_ms
+
+    def _runtime_tail_fade_ms(self) -> int:
+        if self.settings.runtime_tail_fade_ms != DEFAULT_RUNTIME_TAIL_FADE_MS:
+            return self.settings.runtime_tail_fade_ms
+        if self._token_input_width >= 48:
+            return 96
+        return self.settings.runtime_tail_fade_ms
 
     def _build_onnx_inputs(
         self,

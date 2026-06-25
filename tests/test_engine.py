@@ -197,6 +197,26 @@ def test_stream_initial_schedule_limits_respect_explicit_settings():
     assert engine._stream_initial_schedule_limits(96, 12) == (80, 3)
 
 
+def test_runtime_tail_trim_scales_with_bucket():
+    engine = _engine(_settings(runtime_tail_trim_ms=150, runtime_tail_fade_ms=72))
+
+    engine._token_input_width = 24
+    assert engine._runtime_tail_trim_ms() == 150
+    assert engine._runtime_tail_fade_ms() == 72
+
+    engine._token_input_width = 48
+    assert engine._runtime_tail_trim_ms() == 220
+    assert engine._runtime_tail_fade_ms() == 96
+
+
+def test_runtime_tail_trim_respects_explicit_settings():
+    engine = _engine(_settings(runtime_tail_trim_ms=180, runtime_tail_fade_ms=80))
+    engine._token_input_width = 48
+
+    assert engine._runtime_tail_trim_ms() == 180
+    assert engine._runtime_tail_fade_ms() == 80
+
+
 @pytest.mark.asyncio
 async def test_sentence_stream_splits_text_and_pcm_frames():
     engine = _engine(_settings(stream_strategy="sentence", stream_audio_frame_ms=1))

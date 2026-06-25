@@ -188,6 +188,8 @@ Environment variables:
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `24` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | `2` |
+| `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` | `150`; b48+ defaults to `220` unless explicitly set |
+| `FASTKOKORO_RUNTIME_TAIL_FADE_MS` | `72`; b48+ defaults to `96` unless explicitly set |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
 | `FASTKOKORO_ONNX_PROVIDER_OPTIONS` | unset |
 | `FASTKOKORO_ONNX_AUTO_PROVIDERS` | `false` |
@@ -245,6 +247,12 @@ counts are approximate because phoneme tokens vary by language and word length.
 | 48 | 46 | 6-8 | Fewer model calls for longer text; adaptive first chunk targets 6 words |
 | 64 | 62 | 8-11 | Candidate larger export for paragraph-style streaming |
 | 128 | 126 | 16-23 | Candidate maximum-continuity export with higher TTFC |
+
+Runtime tail trim/fade is bucket-aware by default. b24 keeps the original
+`150ms` trim with `72ms` fade, while b48 and larger checkpoints use a slightly
+larger `220ms` trim with `96ms` fade to remove the fixed-output vocoder tail.
+Set `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` and
+`FASTKOKORO_RUNTIME_TAIL_FADE_MS` to override this behavior.
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
