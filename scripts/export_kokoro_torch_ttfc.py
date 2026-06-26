@@ -22,6 +22,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         fixed_alignment_frames: int | None = None,
         output_samples_per_frame: int | None = None,
         output_fade_samples: int = 0,
+        output_tail_margin_samples: int = 0,
         static_alignment: bool = False,
         length_aware: bool = False,
         internal_dtype: torch.dtype = torch.float32,
@@ -33,6 +34,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         self.fixed_alignment_frames = fixed_alignment_frames
         self.output_samples_per_frame = output_samples_per_frame
         self.output_fade_samples = output_fade_samples
+        self.output_tail_margin_samples = output_tail_margin_samples
         self.static_alignment = static_alignment
         self.length_aware = length_aware
         self.internal_dtype = internal_dtype
@@ -96,6 +98,8 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             )
             active_frames = torch.minimum(active_frames, max_frames)
         active_samples = active_frames * self.output_samples_per_frame
+        if self.output_tail_margin_samples > 0:
+            active_samples = active_samples + self.output_tail_margin_samples
         max_samples = torch.tensor(
             sample_count,
             device=waveform.device,
@@ -107,6 +111,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             return waveform * (positions < active_samples).to(waveform.dtype)
 
         fade_start = active_samples - self.output_fade_samples
+        fade_start = torch.clamp(fade_start, min=0)
         fade_progress = (positions - fade_start).to(waveform.dtype) / float(
             self.output_fade_samples
         )
@@ -116,6 +121,11 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             positions < fade_start,
             torch.ones_like(gain),
             gain,
+        )
+        gain = torch.where(
+            positions < active_samples,
+            gain,
+            torch.zeros_like(gain),
         )
         return waveform * gain
 
@@ -260,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixed-alignment-frames", type=int)
     parser.add_argument("--output-samples-per-frame", type=int)
     parser.add_argument("--output-fade-samples", type=int, default=0)
+    parser.add_argument("--output-tail-margin-samples", type=int, default=0)
     parser.add_argument(
         "--precision",
         default="fp32",
@@ -404,6 +415,7 @@ def main() -> int:
         fixed_alignment_frames=args.fixed_alignment_frames,
         output_samples_per_frame=args.output_samples_per_frame,
         output_fade_samples=args.output_fade_samples,
+        output_tail_margin_samples=args.output_tail_margin_samples,
         static_alignment=args.static_alignment,
         length_aware=args.length_aware,
         internal_dtype=internal_dtype,
