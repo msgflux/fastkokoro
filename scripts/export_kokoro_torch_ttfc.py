@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -340,6 +341,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--patch-albert-sdpa-bool-mask-scale",
+        action="store_true",
+        help=(
+            "Patch Albert SDPA export to use a boolean 4D attention mask and "
+            "an explicit attention scale, avoiding dynamic Shape/Sqrt scale "
+            "subgraphs while keeping Albert in fp32."
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="cpu",
         choices=("cpu", "cuda"),
@@ -356,6 +366,8 @@ def main() -> int:
         raise RuntimeError("CUDA requested but torch.cuda.is_available() is false")
 
     add_checkout_to_path(args.kokoro_repo)
+    if args.patch_albert_sdpa_bool_mask_scale:
+        patch_albert_sdpa_bool_mask_scale_for_export()
     from kokoro import KModel  # noqa: PLC0415
 
     kmodel_kwargs: dict[str, object] = {
@@ -459,6 +471,9 @@ def main() -> int:
     )
 
     exported = onnx.load(args.output)
+    if args.patch_albert_sdpa_bool_mask_scale:
+        cleanup_albert_sdpa_bool_mask_scale_export(exported)
+        onnx.save(exported, args.output)
     onnx.checker.check_model(exported)
     ops = Counter(node.op_type for node in exported.graph.node)
     print(f"onnx_path={args.output}")
@@ -746,6 +761,382 @@ def patch_split_adain_for_export(kmodel: torch.nn.Module) -> None:
             split_adain1d_projection(module)
         elif module.__class__.__name__ == "AdaLayerNorm":
             split_adalayernorm_projection(module)
+
+
+def patch_albert_sdpa_bool_mask_scale_for_export() -> None:
+    from transformers import AlbertModel  # noqa: PLC0415
+    from transformers.modeling_outputs import (
+        BaseModelOutputWithPooling,  # noqa: PLC0415
+    )
+    from transformers.models.albert.modeling_albert import (  # noqa: PLC0415
+        AlbertAttention,
+        AlbertEmbeddings,
+        AlbertSdpaAttention,
+    )
+
+    class AlbertExportTokenTypeIds(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, position_ids, batch_size: int, seq_length: int):
+            del ctx
+            return torch.zeros(
+                (batch_size, seq_length),
+                dtype=torch.long,
+                device=position_ids.device,
+            )
+
+        @staticmethod
+        def symbolic(g, position_ids, batch_size, seq_length):
+            del batch_size
+            bucket = int(seq_length)
+            zero_buffer = g.op(
+                "Constant",
+                value_t=torch.zeros((1, 512), dtype=torch.long),
+            )
+            shape = g.op(
+                "Constant",
+                value_t=torch.tensor([1, -1], dtype=torch.long),
+            )
+            rank = g.op("Constant", value_t=torch.tensor([2], dtype=torch.long))
+            ones = g.op(
+                "ConstantOfShape",
+                rank,
+                value_t=torch.tensor([1], dtype=torch.long),
+            )
+            neg_one = g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long))
+            neg_ones = g.op("Mul", ones, neg_one)
+            equal = g.op("Equal", shape, neg_ones)
+            expand_shape = g.op("Where", equal, ones, shape)
+            expanded = g.op("Expand", zero_buffer, expand_shape)
+            gathered = g.op("GatherElements", expanded, position_ids, axis_i=1)
+
+            final_shape = g.op(
+                "Constant",
+                value_t=torch.tensor([1, bucket], dtype=torch.long),
+            )
+            final_rank = g.op("Constant", value_t=torch.tensor([2], dtype=torch.long))
+            final_ones = g.op(
+                "ConstantOfShape",
+                final_rank,
+                value_t=torch.tensor([1], dtype=torch.long),
+            )
+            final_neg_ones = g.op("Mul", final_ones, neg_one)
+            final_equal = g.op("Equal", final_shape, final_neg_ones)
+            final_expand_shape = g.op("Where", final_equal, final_ones, final_shape)
+            return g.op("Expand", gathered, final_expand_shape)
+
+    class AlbertExportBoolMask4d(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, attention_mask, batch_size: int, seq_length: int):
+            del ctx
+            keep_mask = attention_mask.to(dtype=torch.bool)
+            query_keep = (
+                torch.arange(seq_length, device=attention_mask.device).view(
+                    1,
+                    1,
+                    seq_length,
+                    1,
+                )
+                >= 0
+            )
+            return (query_keep & keep_mask[:, None, None, :]).expand(
+                batch_size,
+                1,
+                seq_length,
+                seq_length,
+            )
+
+        @staticmethod
+        def symbolic(g, attention_mask, batch_size, seq_length):
+            del batch_size
+            bucket = int(seq_length)
+            empty_shape = g.op(
+                "Constant",
+                value_t=torch.empty(0, dtype=torch.long),
+            )
+            true_scalar = g.op(
+                "ConstantOfShape",
+                empty_shape,
+                value_t=torch.tensor([True], dtype=torch.bool),
+            )
+            query_positions = g.op(
+                "Constant",
+                value_t=torch.arange(bucket, dtype=torch.long).view(
+                    1,
+                    1,
+                    bucket,
+                    1,
+                ),
+            )
+            zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.long))
+            query_keep = g.op("GreaterOrEqual", query_positions, zero)
+            query_keep = g.op("Cast", query_keep, to_i=9)
+            query_keep = g.op("And", true_scalar, query_keep)
+
+            mask_shape = g.op("Shape", attention_mask)
+            src_dim = g.op("Constant", value_t=torch.tensor([1], dtype=torch.long))
+            src_len = g.op("Gather", mask_shape, src_dim, axis_i=0)
+            flat_mask = g.op("Flatten", attention_mask, axis_i=2)
+            batch_zeros = g.op(
+                "Constant",
+                value_t=torch.zeros((1, 1, 1, 1), dtype=torch.long),
+            )
+            batch_offsets = g.op("Mul", batch_zeros, src_len)
+            source_positions = g.op(
+                "Constant",
+                value_t=torch.arange(bucket, dtype=torch.long).view(
+                    1,
+                    1,
+                    1,
+                    bucket,
+                ),
+            )
+            gather_indices = g.op("Add", source_positions, batch_offsets)
+            gathered = g.op("Gather", flat_mask, gather_indices, axis_i=0)
+            gather_shape = g.op("Shape", gather_indices)
+            flatten_shape = g.op(
+                "Constant",
+                value_t=torch.tensor([-1], dtype=torch.long),
+            )
+            gathered_flat = g.op("Reshape", gathered, flatten_shape)
+            reshape_shape = g.op("Concat", gather_shape, axis_i=0)
+            gathered_mask = g.op("Reshape", gathered_flat, reshape_shape)
+            gathered_mask = g.op("Cast", gathered_mask, to_i=9)
+            keep_mask = g.op("And", query_keep, gathered_mask)
+
+            expand_shape = g.op(
+                "Constant",
+                value_t=torch.tensor([1, -1, bucket, bucket], dtype=torch.long),
+            )
+            rank = g.op("Constant", value_t=torch.tensor([4], dtype=torch.long))
+            ones = g.op(
+                "ConstantOfShape",
+                rank,
+                value_t=torch.tensor([1], dtype=torch.long),
+            )
+            neg_one = g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long))
+            neg_ones = g.op("Mul", ones, neg_one)
+            equal = g.op("Equal", expand_shape, neg_ones)
+            final_shape = g.op("Where", equal, ones, expand_shape)
+            return g.op("Expand", keep_mask, final_shape)
+
+    def embeddings_forward(
+        self,
+        input_ids=None,
+        token_type_ids=None,
+        position_ids=None,
+        inputs_embeds=None,
+        past_key_values_length=0,
+    ):
+        if input_ids is not None:
+            input_shape = input_ids.size()
+        else:
+            input_shape = inputs_embeds.size()[:-1]
+
+        seq_length = input_shape[1]
+        if position_ids is None:
+            position_ids = self.position_ids[
+                :, past_key_values_length : seq_length + past_key_values_length
+            ]
+        if token_type_ids is None:
+            token_type_ids = AlbertExportTokenTypeIds.apply(
+                position_ids,
+                int(input_shape[0]),
+                int(seq_length),
+            )
+
+        if inputs_embeds is None:
+            inputs_embeds = self.word_embeddings(input_ids)
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        embeddings = inputs_embeds + token_type_embeddings
+        if self.position_embedding_type == "absolute":
+            position_embeddings = self.position_embeddings(position_ids)
+            embeddings += position_embeddings
+        embeddings = self.LayerNorm(embeddings)
+        return self.dropout(embeddings)
+
+    def sdpa_forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=None,
+        output_attentions=False,
+    ):
+        if (
+            self.position_embedding_type != "absolute"
+            or output_attentions
+            or head_mask is not None
+        ):
+            return AlbertAttention.forward(
+                self,
+                hidden_states,
+                attention_mask,
+                head_mask,
+                output_attentions,
+            )
+
+        batch_size, seq_len, _ = hidden_states.size()
+        query_layer = self.transpose_for_scores(self.query(hidden_states))
+        key_layer = self.transpose_for_scores(self.key(hidden_states))
+        value_layer = self.transpose_for_scores(self.value(hidden_states))
+        if (
+            getattr(self, "require_contiguous_qkv", False)
+            and query_layer.device.type == "cuda"
+            and attention_mask is not None
+        ):
+            query_layer = query_layer.contiguous()
+            key_layer = key_layer.contiguous()
+            value_layer = value_layer.contiguous()
+
+        attention_output = torch.nn.functional.scaled_dot_product_attention(
+            query_layer,
+            key_layer,
+            value_layer,
+            attn_mask=attention_mask,
+            dropout_p=self.dropout_prob if self.training else 0.0,
+            is_causal=False,
+            scale=1.0 / math.sqrt(self.attention_head_size),
+        )
+        attention_output = attention_output.transpose(1, 2)
+        attention_output = attention_output.reshape(
+            batch_size,
+            seq_len,
+            self.all_head_size,
+        )
+        projected_context_layer = self.dense(attention_output)
+        projected_context_layer_dropout = self.output_dropout(projected_context_layer)
+        layernormed_context_layer = self.LayerNorm(
+            hidden_states + projected_context_layer_dropout
+        )
+        return (layernormed_context_layer,)
+
+    def albert_forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
+
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError(
+                "You cannot specify both input_ids and inputs_embeds at the same time"
+            )
+        if input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        batch_size, seq_length = input_shape
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                input_shape,
+                device=device,
+                dtype=torch.long,
+            )
+
+        embedding_output = self.embeddings(
+            input_ids,
+            position_ids=position_ids,
+            token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds,
+        )
+
+        use_sdpa_attention_mask = (
+            self.attn_implementation == "sdpa"
+            and self.position_embedding_type == "absolute"
+            and head_mask is None
+            and not output_attentions
+        )
+        if use_sdpa_attention_mask:
+            extended_attention_mask = AlbertExportBoolMask4d.apply(
+                attention_mask.to(dtype=torch.bool),
+                int(batch_size),
+                int(seq_length),
+            )
+        else:
+            extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+            extended_attention_mask = extended_attention_mask.to(dtype=self.dtype)
+            extended_attention_mask = (1.0 - extended_attention_mask) * torch.finfo(
+                self.dtype
+            ).min
+
+        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+        encoder_outputs = self.encoder(
+            embedding_output,
+            extended_attention_mask,
+            head_mask=head_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        sequence_output = encoder_outputs[0]
+        pooled_output = (
+            self.pooler_activation(self.pooler(sequence_output[:, 0]))
+            if self.pooler is not None
+            else None
+        )
+        if not return_dict:
+            return (sequence_output, pooled_output) + encoder_outputs[1:]
+        return BaseModelOutputWithPooling(
+            last_hidden_state=sequence_output,
+            pooler_output=pooled_output,
+            hidden_states=encoder_outputs.hidden_states,
+            attentions=encoder_outputs.attentions,
+        )
+
+    AlbertSdpaAttention.forward = sdpa_forward
+    AlbertEmbeddings.forward = embeddings_forward
+    AlbertModel.forward = albert_forward
+
+
+def cleanup_albert_sdpa_bool_mask_scale_export(model: onnx.ModelProto) -> None:
+    replacements = {
+        "/bert/embeddings/Cast_output_0": "/bert/embeddings/Expand_1_output_0",
+        "/bert/embeddings/Constant_5_output_0": (
+            "/bert/embeddings/Constant_4_output_0"
+        ),
+        "/bert/embeddings/Constant_9_output_0": (
+            "/bert/embeddings/Constant_8_output_0"
+        ),
+        "/bert/Constant_10_output_0": "/bert/Constant_9_output_0",
+    }
+    remove_node_names = {
+        "/bert/embeddings/Cast",
+        "/bert/embeddings/Constant_5",
+        "/bert/embeddings/Constant_9",
+        "/bert/Constant_10",
+    }
+    for node in model.graph.node:
+        for index, input_name in enumerate(node.input):
+            if input_name in replacements:
+                node.input[index] = replacements[input_name]
+
+    kept_nodes = [
+        node for node in model.graph.node if node.name not in remove_node_names
+    ]
+    del model.graph.node[:]
+    model.graph.node.extend(kept_nodes)
 
 
 def split_adain1d_projection(module: torch.nn.Module) -> None:
