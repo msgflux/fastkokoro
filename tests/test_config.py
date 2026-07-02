@@ -123,7 +123,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_model_path is None
     assert settings.onnx_adain_custom_op_library is None
     assert settings.model_repo == "msgflux/Kokoro-82M-streaming-onnx"
-    assert settings.model_file == "onnx/kokoro-82m-streaming-b48-fp16.onnx"
+    assert settings.model_file == "onnx/kokoro-82m-streaming-b64-fp16.onnx"
     assert settings.voices_file == "voices.npz"
     assert settings.warmup_text == DEFAULT_WARMUP_TEXT
     assert settings.onnx_ttfc_model_path == DEFAULT_ONNX_TTFC_MODEL_PATH
@@ -135,7 +135,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.profile_warmup is DEFAULT_PROFILE
     assert settings.profile_requests is DEFAULT_PROFILE
     assert settings.profile_dir == settings.cache_dir / "profiles"
-    assert settings.stream_strategy == "adaptive"
+    assert settings.stream_strategy == "sentence"
     assert settings.stream_adaptive_max_chars == 50
     assert settings.stream_adaptive_cpu_max_chars == 12
     assert settings.stream_max_segment_chars is None

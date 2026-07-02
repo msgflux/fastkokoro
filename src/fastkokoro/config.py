@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_MODEL_REPO = "msgflux/Kokoro-82M-streaming-onnx"
-DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b48-fp16.onnx"
+DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b64-fp16.onnx"
 DEFAULT_VOICES_FILE = "voices.npz"
 DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
@@ -34,7 +34,7 @@ DEFAULT_WARMUP_TEXT = (
 )
 DEFAULT_RUNTIME_TAIL_TRIM_MS = 150
 DEFAULT_RUNTIME_TAIL_FADE_MS = 72
-DEFAULT_STREAM_STRATEGY = "adaptive"
+DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200

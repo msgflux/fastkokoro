@@ -9,7 +9,7 @@ other providers when the matching runtime package is installed. The default
 model is the fixed-bucket streaming export:
 `msgflux/Kokoro-82M-streaming-onnx`.
 
-The default checkpoint is `onnx/kokoro-82m-streaming-b48-fp16.onnx`.
+The default checkpoint is `onnx/kokoro-82m-streaming-b64-fp16.onnx`.
 
 ## Demo
 
@@ -179,7 +179,7 @@ Environment variables:
 | `FASTKOKORO_HOST` | `0.0.0.0` |
 | `FASTKOKORO_PORT` | `8880` |
 | `FASTKOKORO_MODEL_REPO` | `msgflux/Kokoro-82M-streaming-onnx` |
-| `FASTKOKORO_MODEL_FILE` | `onnx/kokoro-82m-streaming-b48-fp16.onnx` |
+| `FASTKOKORO_MODEL_FILE` | `onnx/kokoro-82m-streaming-b64-fp16.onnx` |
 | `FASTKOKORO_MODEL_PATH` | unset; downloads from Hugging Face |
 | `FASTKOKORO_VOICES_FILE` | `voices.npz` |
 | `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
@@ -189,10 +189,10 @@ Environment variables:
 | `FASTKOKORO_WARMUP` | `true` |
 | `FASTKOKORO_WARMUP_TEXT` | `Hello there. This is a warmup request for streaming speech generation.` |
 | `FASTKOKORO_WARMUP_REQUEST` | `false` |
-| `FASTKOKORO_STREAM_STRATEGY` | `adaptive` |
+| `FASTKOKORO_STREAM_STRATEGY` | `sentence` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
-| `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | unset; scheduler chooses from bucket |
-| `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | unset; scheduler chooses from bucket |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | unset; scheduled strategies choose from bucket |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | unset; scheduled strategies choose from bucket |
 | `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` | `150`; b48+ defaults to `220` unless explicitly set |
 | `FASTKOKORO_RUNTIME_TAIL_FADE_MS` | `72`; b48+ defaults to `96` unless explicitly set |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
@@ -228,12 +228,14 @@ request latency on the first user request.
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
 the same streaming speech endpoint flow and consume the first chunk.
 
-The default b48 streaming model is the balanced option for typical local use:
-it keeps short phrases together while staying comfortably under 100 ms
-cache-hit model-call latency with TensorRT EP on the measured GTX 1650 host.
-b24 is available for extremely low latency when 2-3 word chunks are acceptable.
-b16 is experimental and best treated as a single-word checkpoint; b96 is the
-useful large-bucket option before b128's latency jump.
+The default b64 streaming model prioritizes a better out-of-the-box listening
+experience over the lowest possible TTFC. It keeps more Portuguese and English
+short phrases inside one inference while still measuring about 105 ms cache-hit
+model-call latency with TensorRT EP on the measured GTX 1650 host. b48 remains
+the lower-latency balanced option, b24 is available for extremely low latency
+when 2-3 word chunks are acceptable, and b16 is experimental and best treated as
+a single-word checkpoint. b96 is the useful large-bucket option before b128's
+latency jump.
 
 ```bash
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b16-fp16.onnx
@@ -257,8 +259,8 @@ speed `0.85`; speed `1.0` can fit roughly one extra word in some buckets.
 | 16 | 14 | 40 | 22,320 | 1-2 | 33 ms | Experimental; single words only |
 | 24 | 22 | 56 | 30,000 | 3 | 45 ms | Ultra-low-latency opt-in |
 | 32 | 30 | 72 | 37,680 | 4-5 | 54 ms | Short phrases |
-| 48 | 46 | 104 | 53,040 | 6 | 76 ms | Recommended default |
-| 64 | 62 | 136 | 68,400 | 8 | 105 ms | Larger chunks with moderate latency |
+| 48 | 46 | 104 | 53,040 | 6 | 76 ms | Balanced low-latency option |
+| 64 | 62 | 136 | 68,400 | 8 | 105 ms | Recommended default |
 | 96 | 94 | 200 | 99,120 | 14 | 134 ms | Recommended large bucket |
 | 128 | 126 | 264 | 129,840 | 18 | 272 ms | Optional long-continuity bucket |
 
@@ -271,10 +273,10 @@ trim removes the remaining fixed-output tail. Set
 you need to override the default final cleanup.
 
 Export recipe used for the current Hugging Face checkpoints. Set `B` to the
-target bucket; the default release bucket is `48`.
+target bucket; the default release bucket is `64`.
 
 ```bash
-B=48
+B=64
 ALIGN=$((2 * B + 8))
 SAMPLES=$((ALIGN * 480 + 3120))
 
@@ -315,19 +317,19 @@ raw `.prof` file plus a `.txt` summary sorted by cumulative time. Use
 `FASTKOKORO_PROFILE_WARMUP` and `FASTKOKORO_PROFILE_REQUESTS` to narrow profiling to
 startup or request handling when debugging TTFC regressions.
 
-`FASTKOKORO_STREAM_STRATEGY=adaptive` is the default. It keeps short sentences
-intact for more natural prosody, and uses scheduled word-boundary chunks for
-longer sentences to keep TTFC bounded. By default the scheduler chooses chunk
-limits from the loaded model bucket; `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
+`FASTKOKORO_STREAM_STRATEGY=sentence` is the default. It synthesizes one sentence
+at a time, then applies the loaded ONNX bucket's real phonemized token width if a
+sentence is too long. This favors natural continuity over aggressively small
+text chunks. `phrase` splits on phrase punctuation such as commas, semicolons,
+and question marks. `adaptive` and `chunk` use scheduled word-boundary chunks to
+reduce first-audio latency, but can sound less natural on some voices/languages.
+`FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
 `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` are unset and only act as explicit user
-overrides when configured. Static ONNX buckets still apply their safe word cap,
-so overrides cannot send more text than the checkpoint should handle. Set
-`FASTKOKORO_STREAM_STRATEGY=chunk` for minimum TTFC; this uses the same scheduler
-from the first segment, trading continuity for lower first audio latency.
-`phrase` splits only on phrase punctuation such as commas, semicolons, and
-question marks. `sentence` synthesizes one sentence at a time. For
-`response_format=pcm`, the server also slices each generated segment into
-smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
+overrides for those scheduled strategies when configured. Static ONNX buckets
+still apply their safe token-width cap, so overrides cannot send more text than
+the checkpoint should handle. For `response_format=pcm`, the server also slices
+each generated segment into smaller audio frames controlled by
+`FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
 uses the local fastkokoro synthesis path instead of the upstream engine.
 
