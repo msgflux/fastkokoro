@@ -253,6 +253,9 @@ phoneme tokens. Practical word capacity is lower and depends on language,
 punctuation, voice, and speed because the model also predicts duration. The
 table below is the observed safe expectation from English/Portuguese probes at
 speed `0.85`; speed `1.0` can fit roughly one extra word in some buckets.
+The default `sentence` strategy uses this conservative capacity before falling
+back to the model's real phonemized token width, so long sentences are split
+before late words land at the tail of a near-full fixed-output window.
 
 | Bucket | Usable tokens | Alignment frames | Output samples | Expected words | TensorRT p50 | Notes |
 | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -260,7 +263,7 @@ speed `0.85`; speed `1.0` can fit roughly one extra word in some buckets.
 | 24 | 22 | 56 | 30,000 | 3 | 45 ms | Ultra-low-latency opt-in |
 | 32 | 30 | 72 | 37,680 | 4-5 | 54 ms | Short phrases |
 | 48 | 46 | 104 | 53,040 | 6 | 76 ms | Balanced low-latency option |
-| 64 | 62 | 136 | 68,400 | 8 | 105 ms | Recommended default |
+| 64 | 62 | 136 | 68,400 | 6 | 105 ms | Recommended default |
 | 96 | 94 | 200 | 99,120 | 14 | 134 ms | Recommended large bucket |
 | 128 | 126 | 264 | 129,840 | 18 | 272 ms | Optional long-continuity bucket |
 

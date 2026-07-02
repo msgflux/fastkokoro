@@ -72,7 +72,7 @@ STATIC_BUCKET_WORD_CAPACITY = {
     24: 3,
     32: 5,
     48: 6,
-    64: 8,
+    64: 6,
     96: 14,
     128: 18,
 }
@@ -793,6 +793,9 @@ class FastKokoro:
                         )
             else:
                 text_segments = split_sentences(segment.text)
+                text_segments = self._split_text_segments_for_stream_bucket_capacity(
+                    text_segments
+                )
 
             for item in self._split_text_segments_for_onnx_token_width(
                 text_segments,
@@ -800,6 +803,28 @@ class FastKokoro:
             ):
                 segments.append(TextControlSegment(text=item))
         return segments
+
+    def _split_text_segments_for_stream_bucket_capacity(
+        self,
+        text_segments: list[str],
+    ) -> list[str]:
+        capacity = self._stream_bucket_word_capacity()
+        if capacity is None:
+            return text_segments
+
+        max_chars = max(SCHEDULER_MIN_SEGMENT_CHARS, capacity * 16)
+        output: list[str] = []
+        for text in text_segments:
+            output.extend(
+                split_scheduled_chunks(
+                    text,
+                    initial_max_chars=max_chars,
+                    initial_max_words=capacity,
+                    max_chars=max_chars,
+                    max_words=capacity,
+                )
+            )
+        return output
 
     def _split_text_segments_for_onnx_token_width(
         self,

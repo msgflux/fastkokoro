@@ -273,6 +273,21 @@ async def test_sentence_stream_splits_text_and_pcm_frames():
     assert all(len(chunk) == 48 for chunk in chunks)
 
 
+def test_sentence_stream_caps_static_bucket_word_capacity():
+    engine = _engine(_settings(stream_strategy="sentence", stream_audio_frame_ms=1))
+    _set_static_token_width(engine, 64)
+
+    segments = engine._stream_text_control_segments(
+        "one two three four five six seven eight.",
+        lang="en-us",
+    )
+
+    assert [segment.text for segment in segments] == [
+        "one two three four five six",
+        "seven eight.",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_kokoro_stream_strategy_uses_local_engine_path():
     engine = _engine(_settings(stream_strategy="kokoro"))
