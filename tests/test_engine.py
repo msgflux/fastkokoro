@@ -71,8 +71,8 @@ def _settings(**overrides):
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=1,
-        stream_max_segment_chars=80,
-        stream_max_segment_words=12,
+        stream_max_segment_chars=None,
+        stream_max_segment_words=None,
         stream_schedule_max_segment_chars=96,
         stream_schedule_max_segment_words=12,
         stream_cpu_schedule_max_segment_chars=48,
@@ -163,13 +163,22 @@ def _set_providers(engine, providers):
     )
 
 
-def test_stream_initial_schedule_limits_scale_with_bucket():
-    engine = _engine(
-        _settings(
-            stream_max_segment_chars=24,
-            stream_max_segment_words=2,
-        )
+def _set_static_token_width(engine, width):
+    input_names = frozenset({"input_ids", "style", "speed", "input_lengths"})
+    engine._onnx_input_names = input_names
+    engine._token_input_name = "input_ids"
+    engine._token_input_width = width
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=input_names,
+        output_name="audio",
+        token_input_name=engine._token_input_name,
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
     )
+
+
+def test_stream_initial_schedule_limits_scale_with_bucket():
+    engine = _engine(_settings())
 
     cases = [
         (16, (24, 1)),
@@ -195,6 +204,34 @@ def test_stream_initial_schedule_limits_respect_explicit_settings():
     engine._token_input_width = 48
 
     assert engine._stream_initial_schedule_limits(96, 12) == (80, 3)
+
+
+def test_stream_schedule_limits_cap_fixed_bucket_word_capacity():
+    engine = _engine(
+        _settings(
+            stream_schedule_max_segment_chars=96,
+            stream_schedule_max_segment_words=12,
+        )
+    )
+    _set_providers(engine, ["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+    _set_static_token_width(engine, 24)
+    assert engine._stream_schedule_limits() == (48, 3)
+
+    _set_static_token_width(engine, 48)
+    assert engine._stream_schedule_limits() == (96, 6)
+
+
+def test_stream_initial_schedule_limits_cap_explicit_settings_to_bucket_capacity():
+    engine = _engine(
+        _settings(
+            stream_max_segment_chars=120,
+            stream_max_segment_words=12,
+        )
+    )
+    _set_static_token_width(engine, 48)
+
+    assert engine._stream_initial_schedule_limits(120, 12) == (96, 6)
 
 
 def test_runtime_tail_trim_scales_with_bucket():
@@ -379,8 +416,6 @@ async def test_adaptive_stream_scales_initial_segment_with_gpu_bucket():
         _settings(
             stream_strategy="adaptive",
             stream_audio_frame_ms=1,
-            stream_max_segment_chars=24,
-            stream_max_segment_words=2,
             stream_schedule_max_segment_chars=96,
             stream_schedule_max_segment_words=12,
         )
@@ -409,6 +444,65 @@ async def test_adaptive_stream_scales_initial_segment_with_gpu_bucket():
         ),
         "nineteen",
     ]
+
+
+def test_stream_text_segments_respect_static_onnx_token_width():
+    engine = _engine(
+        _settings(
+            stream_strategy="adaptive",
+            stream_adaptive_max_chars=50,
+        )
+    )
+    _set_static_token_width(engine, 8)
+
+    segments = engine._stream_text_control_segments(
+        "one two three",
+        lang="en-us",
+    )
+
+    assert [segment.text for segment in segments] == ["one", "two", "three"]
+    assert all(
+        engine._text_token_count(segment.text, "en-us") <= 6 for segment in segments
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_never_sends_more_tokens_than_fixed_onnx_width():
+    observed_input_lengths = []
+    engine = _engine(
+        _settings(
+            stream_strategy="adaptive",
+            stream_adaptive_max_chars=50,
+        )
+    )
+    _set_static_token_width(engine, 8)
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        get_inputs=lambda: [
+            SimpleNamespace(name="input_ids", shape=[1, 8]),
+            SimpleNamespace(name="style"),
+            SimpleNamespace(name="speed"),
+            SimpleNamespace(name="input_lengths"),
+        ],
+        get_outputs=lambda: [SimpleNamespace(name="audio")],
+        run=lambda output_names, inputs: (
+            observed_input_lengths.append(int(inputs["input_lengths"][0]))
+            or [np.ones(48, dtype=np.float32)]
+        ),
+    )
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            "one two three",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert observed_input_lengths == [5, 5, 7]
+    assert all(length <= 8 for length in observed_input_lengths)
 
 
 def test_create_uses_cached_onnx_input_names():

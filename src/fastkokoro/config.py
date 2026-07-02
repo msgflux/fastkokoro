@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_MODEL_REPO = "msgflux/Kokoro-82M-streaming-onnx"
-DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b24-fp16.onnx"
+DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b48-fp16.onnx"
 DEFAULT_VOICES_FILE = "voices.npz"
 DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
@@ -38,8 +38,8 @@ DEFAULT_STREAM_STRATEGY = "adaptive"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
-DEFAULT_STREAM_MAX_SEGMENT_CHARS = 24
-DEFAULT_STREAM_MAX_SEGMENT_WORDS = 2
+DEFAULT_STREAM_MAX_SEGMENT_CHARS = None
+DEFAULT_STREAM_MAX_SEGMENT_WORDS = None
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_WORDS = 12
 DEFAULT_STREAM_CPU_SCHEDULE_MAX_SEGMENT_CHARS = 48
@@ -96,8 +96,8 @@ class Settings:
     profile_requests: bool
     stream_strategy: str
     stream_audio_frame_ms: int
-    stream_max_segment_chars: int
-    stream_max_segment_words: int
+    stream_max_segment_chars: int | None
+    stream_max_segment_words: int | None
     stream_schedule_max_segment_chars: int
     stream_schedule_max_segment_words: int
     stream_adaptive_max_chars: int
@@ -280,18 +280,12 @@ class Settings:
                 ),
                 name="FASTKOKORO_STREAM_AUDIO_FRAME_MS",
             ),
-            stream_max_segment_chars=parse_positive_int(
-                os.getenv(
-                    "FASTKOKORO_STREAM_MAX_SEGMENT_CHARS",
-                    str(DEFAULT_STREAM_MAX_SEGMENT_CHARS),
-                ),
+            stream_max_segment_chars=parse_optional_positive_int(
+                os.getenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS"),
                 name="FASTKOKORO_STREAM_MAX_SEGMENT_CHARS",
             ),
-            stream_max_segment_words=parse_positive_int(
-                os.getenv(
-                    "FASTKOKORO_STREAM_MAX_SEGMENT_WORDS",
-                    str(DEFAULT_STREAM_MAX_SEGMENT_WORDS),
-                ),
+            stream_max_segment_words=parse_optional_positive_int(
+                os.getenv("FASTKOKORO_STREAM_MAX_SEGMENT_WORDS"),
                 name="FASTKOKORO_STREAM_MAX_SEGMENT_WORDS",
             ),
             stream_schedule_max_segment_chars=parse_positive_int(

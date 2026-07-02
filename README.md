@@ -9,7 +9,7 @@ other providers when the matching runtime package is installed. The default
 model is the fixed-bucket streaming export:
 `msgflux/Kokoro-82M-streaming-onnx`.
 
-The default checkpoint is `onnx/kokoro-82m-streaming-b24-fp16.onnx`.
+The default checkpoint is `onnx/kokoro-82m-streaming-b48-fp16.onnx`.
 
 ## Demo
 
@@ -155,17 +155,22 @@ The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
 published only through the TensorRT 25.06 image. Current Python 3.12 ONNX
 Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
 
-Local measurements on a GTX 1650 (SM75), using the b24 streaming model,
-`FASTKOKORO_STREAM_STRATEGY=adaptive`, `response_format=pcm`, and HTTP
-streaming:
+Local cache-hit model-call measurements on a GTX 1650 (SM75), using TensorRT EP
+with engine and timing cache enabled:
 
-| Scenario | Provider | TTFC p50 |
-| --- | --- | ---: |
-| Medium/long adaptive streaming | CUDA EP | 58.7 ms |
-| Medium/long adaptive streaming | TensorRT EP | 46.1 ms |
+| Bucket | TensorRT EP p50 |
+| ---: | ---: |
+| 16 | 33 ms |
+| 24 | 45 ms |
+| 32 | 54 ms |
+| 48 | 76 ms |
+| 64 | 105 ms |
+| 96 | 134 ms |
+| 128 | 272 ms |
 
 These numbers exclude first-time TensorRT engine build. On the same host, first
-engine build took minutes; persist `/models/trt-cache` for production.
+engine builds took roughly 2-4 minutes per bucket; persist `/models/trt-cache`
+for production.
 
 Environment variables:
 
@@ -174,7 +179,7 @@ Environment variables:
 | `FASTKOKORO_HOST` | `0.0.0.0` |
 | `FASTKOKORO_PORT` | `8880` |
 | `FASTKOKORO_MODEL_REPO` | `msgflux/Kokoro-82M-streaming-onnx` |
-| `FASTKOKORO_MODEL_FILE` | `onnx/kokoro-82m-streaming-b24-fp16.onnx` |
+| `FASTKOKORO_MODEL_FILE` | `onnx/kokoro-82m-streaming-b48-fp16.onnx` |
 | `FASTKOKORO_MODEL_PATH` | unset; downloads from Hugging Face |
 | `FASTKOKORO_VOICES_FILE` | `voices.npz` |
 | `FASTKOKORO_VOICES_INDEX_FILE` | `voices.txt` |
@@ -186,8 +191,8 @@ Environment variables:
 | `FASTKOKORO_WARMUP_REQUEST` | `false` |
 | `FASTKOKORO_STREAM_STRATEGY` | `adaptive` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
-| `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | `24` |
-| `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | `2` |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | unset; scheduler chooses from bucket |
+| `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | unset; scheduler chooses from bucket |
 | `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` | `150`; b48+ defaults to `220` unless explicitly set |
 | `FASTKOKORO_RUNTIME_TAIL_FADE_MS` | `72`; b48+ defaults to `96` unless explicitly set |
 | `FASTKOKORO_ONNX_PROVIDERS` | `CPUExecutionProvider` |
@@ -223,36 +228,82 @@ request latency on the first user request.
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
 the same streaming speech endpoint flow and consume the first chunk.
 
-The default b24 streaming model is the balanced option for sub-60 ms local TTFC
-without over-fragmenting medium text. TensorRT EP can reduce TTFC below 50 ms
-after its engine cache is built. For minimum TTFC with very short chunks, use
-b16; for larger chunks, use b32 or b48:
+The default b48 streaming model is the balanced option for typical local use:
+it keeps short phrases together while staying comfortably under 100 ms
+cache-hit model-call latency with TensorRT EP on the measured GTX 1650 host.
+b24 is available for extremely low latency when 2-3 word chunks are acceptable.
+b16 is experimental and best treated as a single-word checkpoint; b96 is the
+useful large-bucket option before b128's latency jump.
 
 ```bash
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b16-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b24-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b32-fp16.onnx
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b48-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b64-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b96-fp16.onnx
+FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b128-fp16.onnx
 ```
 
-Bucket size controls the maximum token width of each model call. Two positions
-are reserved by the model, so usable text capacity is `bucket - 2` tokens. Word
-counts are approximate because phoneme tokens vary by language and word length.
+Bucket size controls both token width and the fixed alignment window. Two token
+positions are reserved by the model, so usable text capacity is `bucket - 2`
+phoneme tokens. Practical word capacity is lower and depends on language,
+punctuation, voice, and speed because the model also predicts duration. The
+table below is the observed safe expectation from English/Portuguese probes at
+speed `0.85`; speed `1.0` can fit roughly one extra word in some buckets.
 
-| Bucket | Usable tokens | Approx words | Notes |
-| ---: | ---: | ---: | --- |
-| 16 | 14 | 1-2 | Lowest TTFC; adaptive first chunk targets 1 word |
-| 24 | 22 | 2-4 | Recommended default; adaptive first chunk targets 2 words |
-| 32 | 30 | 4-5 | Larger chunks with moderate latency; adaptive first chunk targets 4 words |
-| 48 | 46 | 6-8 | Fewer model calls for longer text; adaptive first chunk targets 6 words |
-| 64 | 62 | 8-11 | Candidate larger export for paragraph-style streaming |
-| 128 | 126 | 16-23 | Candidate maximum-continuity export with higher TTFC |
+| Bucket | Usable tokens | Alignment frames | Output samples | Expected words | TensorRT p50 | Notes |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 16 | 14 | 40 | 22,320 | 1-2 | 33 ms | Experimental; single words only |
+| 24 | 22 | 56 | 30,000 | 3 | 45 ms | Ultra-low-latency opt-in |
+| 32 | 30 | 72 | 37,680 | 4-5 | 54 ms | Short phrases |
+| 48 | 46 | 104 | 53,040 | 6 | 76 ms | Recommended default |
+| 64 | 62 | 136 | 68,400 | 8 | 105 ms | Larger chunks with moderate latency |
+| 96 | 94 | 200 | 99,120 | 14 | 134 ms | Recommended large bucket |
+| 128 | 126 | 264 | 129,840 | 18 | 272 ms | Optional long-continuity bucket |
 
-Runtime tail trim/fade is bucket-aware by default. b24 keeps the original
-`150ms` trim with `72ms` fade, while b48 and larger checkpoints use a slightly
-larger `220ms` trim with `96ms` fade to remove the fixed-output vocoder tail.
-Set `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` and
-`FASTKOKORO_RUNTIME_TAIL_FADE_MS` to override this behavior.
+The server splits fixed-width ONNX requests by phonemized token count before
+running inference, so a text segment is not sent to a checkpoint with more valid
+tokens than its input width supports. The exported graph also masks waveform
+output to predicted duration plus a 3120-sample margin; normal per-part silence
+trim removes the remaining fixed-output tail. Set
+`FASTKOKORO_RUNTIME_TAIL_TRIM_MS` and `FASTKOKORO_RUNTIME_TAIL_FADE_MS` only if
+you need to override the default final cleanup.
+
+Export recipe used for the current Hugging Face checkpoints. Set `B` to the
+target bucket; the default release bucket is `48`.
+
+```bash
+B=48
+ALIGN=$((2 * B + 8))
+SAMPLES=$((ALIGN * 480 + 3120))
+
+uv run \
+  --with torch==2.5.1 \
+  --with transformers==4.48.3 \
+  --with onnx \
+  --with numpy \
+  --with huggingface-hub \
+  --with loguru \
+  --with 'misaki[en]>=0.9.4' \
+  python scripts/export_kokoro_torch_ttfc.py \
+    --kokoro-repo demo-output/reexport/hexgrad-kokoro \
+    --output "demo-output/reexport/family-frame480-margin3120/kokoro-82m-streaming-b${B}-decoder-fp16-frame480-margin3120.onnx" \
+    --bucket "$B" \
+    --fixed-alignment-frames "$ALIGN" \
+    --fixed-output-samples "$SAMPLES" \
+    --output-samples-per-frame 480 \
+    --output-tail-margin-samples 3120 \
+    --precision decoder-fp16 \
+    --opset 17 \
+    --legacy-export \
+    --length-aware \
+    --patch-fixed-lstm \
+    --patch-scatterless-sine-source \
+    --patch-split-adain \
+    --patch-albert-sdpa-bool-mask-scale \
+    --device cuda
+```
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
@@ -266,16 +317,18 @@ startup or request handling when debugging TTFC regressions.
 
 `FASTKOKORO_STREAM_STRATEGY=adaptive` is the default. It keeps short sentences
 intact for more natural prosody, and uses scheduled word-boundary chunks for
-longer sentences to keep TTFC bounded. With default settings, the first scheduled
-chunk scales with the loaded model bucket; explicit segment env vars override
-that schedule. Set `FASTKOKORO_STREAM_STRATEGY=chunk`
-for minimum TTFC; this enforces `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
-`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` from the first segment, trading continuity
-for lower first audio latency. `phrase` splits only on phrase punctuation such
-as commas, semicolons, and question marks. `sentence` synthesizes one sentence
-at a time. For `response_format=pcm`, the server also slices each generated
-segment into smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`.
-Set `FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
+longer sentences to keep TTFC bounded. By default the scheduler chooses chunk
+limits from the loaded model bucket; `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` and
+`FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` are unset and only act as explicit user
+overrides when configured. Static ONNX buckets still apply their safe word cap,
+so overrides cannot send more text than the checkpoint should handle. Set
+`FASTKOKORO_STREAM_STRATEGY=chunk` for minimum TTFC; this uses the same scheduler
+from the first segment, trading continuity for lower first audio latency.
+`phrase` splits only on phrase punctuation such as commas, semicolons, and
+question marks. `sentence` synthesizes one sentence at a time. For
+`response_format=pcm`, the server also slices each generated segment into
+smaller audio frames controlled by `FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
+`FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
 uses the local fastkokoro synthesis path instead of the upstream engine.
 
 Inline pause tokens can be embedded in input text. `[pause:1.5s]` inserts 1.5

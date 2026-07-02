@@ -18,8 +18,6 @@ from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part, trim_au
 from fastkokoro.config import (
     DEFAULT_RUNTIME_TAIL_FADE_MS,
     DEFAULT_RUNTIME_TAIL_TRIM_MS,
-    DEFAULT_STREAM_MAX_SEGMENT_CHARS,
-    DEFAULT_STREAM_MAX_SEGMENT_WORDS,
     Settings,
 )
 from fastkokoro.graph_fusion import resolve_adain_fused_model_path
@@ -69,6 +67,16 @@ OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
 PAUSE_TAG_PATTERN = re.compile(r"\[pause:(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
 PHONEME_BREAK_PRIORITY = ("!.?\u2026", ":;", ",\u2014")
+STATIC_BUCKET_WORD_CAPACITY = {
+    16: 1,
+    24: 3,
+    32: 5,
+    48: 6,
+    64: 8,
+    96: 14,
+    128: 18,
+}
+SCHEDULER_MIN_SEGMENT_CHARS = 24
 
 _PHONEMIZE_CACHE_MAXSIZE = 128
 
@@ -619,7 +627,7 @@ class FastKokoro:
             return
 
         used_ttfc_session = False
-        for segment in self._stream_text_control_segments(text):
+        for segment in self._stream_text_control_segments(text, lang=resolved_lang):
             if segment.pause_seconds is None:
                 ttfc_session = self.ttfc_session if not used_ttfc_session else None
                 if ttfc_session is not None:
@@ -665,34 +673,72 @@ class FastKokoro:
     def _stream_schedule_limits(self) -> tuple[int, int]:
         providers = set(self.session.get_providers())
         if {"CUDAExecutionProvider", "TensorrtExecutionProvider"} & providers:
-            return (
+            return self._cap_stream_limits_for_bucket(
                 self.settings.stream_schedule_max_segment_chars,
                 self.settings.stream_schedule_max_segment_words,
             )
-        return (
+        return self._cap_stream_limits_for_bucket(
             self.settings.stream_cpu_schedule_max_segment_chars,
             self.settings.stream_cpu_schedule_max_segment_words,
         )
 
+    def _cap_stream_limits_for_bucket(
+        self,
+        max_chars: int,
+        max_words: int,
+    ) -> tuple[int, int]:
+        capacity = self._stream_bucket_word_capacity()
+        if capacity is None:
+            return max_chars, max_words
+        capped_words = min(max_words, capacity)
+        capped_chars = min(
+            max_chars,
+            max(SCHEDULER_MIN_SEGMENT_CHARS, capped_words * 16),
+        )
+        return capped_chars, capped_words
+
+    def _stream_bucket_word_capacity(self) -> int | None:
+        if not self._onnx_profile.token_input_static:
+            return None
+        if self._token_input_width in STATIC_BUCKET_WORD_CAPACITY:
+            return STATIC_BUCKET_WORD_CAPACITY[self._token_input_width]
+        usable_tokens = max(1, self._token_input_width - 2)
+        return max(1, int(usable_tokens / 7.5))
+
     def _stream_initial_schedule_limits(
         self, max_chars: int, max_words: int
     ) -> tuple[int, int]:
-        if (
-            self.settings.stream_max_segment_chars != DEFAULT_STREAM_MAX_SEGMENT_CHARS
-            or self.settings.stream_max_segment_words
-            != DEFAULT_STREAM_MAX_SEGMENT_WORDS
-        ):
-            return (
-                min(self.settings.stream_max_segment_chars, max_chars),
-                min(self.settings.stream_max_segment_words, max_words),
+        configured_chars = self.settings.stream_max_segment_chars
+        configured_words = self.settings.stream_max_segment_words
+        if configured_chars is not None or configured_words is not None:
+            auto_chars, auto_words = self._auto_stream_initial_schedule_limits(
+                max_chars,
+                max_words,
+            )
+            return self._cap_stream_limits_for_bucket(
+                min(configured_chars or auto_chars, max_chars),
+                min(configured_words or auto_words, max_words),
             )
 
+        return self._auto_stream_initial_schedule_limits(max_chars, max_words)
+
+    def _auto_stream_initial_schedule_limits(
+        self, max_chars: int, max_words: int
+    ) -> tuple[int, int]:
         usable_tokens = max(1, self._token_input_width - 2)
         initial_words = max(1, int(usable_tokens / 7.5))
-        initial_chars = max(DEFAULT_STREAM_MAX_SEGMENT_CHARS, initial_words * 12)
-        return min(initial_chars, max_chars), min(initial_words, max_words)
+        initial_chars = max(SCHEDULER_MIN_SEGMENT_CHARS, initial_words * 12)
+        return self._cap_stream_limits_for_bucket(
+            min(initial_chars, max_chars),
+            min(initial_words, max_words),
+        )
 
-    def _stream_text_control_segments(self, text: str) -> list[TextControlSegment]:
+    def _stream_text_control_segments(
+        self,
+        text: str,
+        *,
+        lang: str,
+    ) -> list[TextControlSegment]:
         segments: list[TextControlSegment] = []
         for segment in split_text_control_segments(text):
             if segment.pause_seconds is not None:
@@ -748,8 +794,86 @@ class FastKokoro:
             else:
                 text_segments = split_sentences(segment.text)
 
-            segments.extend(TextControlSegment(text=item) for item in text_segments)
+            for item in self._split_text_segments_for_onnx_token_width(
+                text_segments,
+                lang=lang,
+            ):
+                segments.append(TextControlSegment(text=item))
         return segments
+
+    def _split_text_segments_for_onnx_token_width(
+        self,
+        text_segments: list[str],
+        *,
+        lang: str,
+    ) -> list[str]:
+        profile = self._onnx_profile
+        if not profile.token_input_static:
+            return text_segments
+
+        max_tokens = profile.token_input_width - 2
+        if max_tokens <= 0:
+            raise ValueError("Fixed ONNX token input width must leave room for pads")
+
+        output: list[str] = []
+        for text in text_segments:
+            output.extend(self._split_text_for_onnx_token_width(text, lang, max_tokens))
+        return output
+
+    def _split_text_for_onnx_token_width(
+        self,
+        text: str,
+        lang: str,
+        max_tokens: int,
+    ) -> list[str]:
+        if self._text_token_count(text, lang) <= max_tokens:
+            return [text]
+
+        batches: list[str] = []
+        current = ""
+        for word in text.split():
+            candidate = word if not current else f"{current} {word}"
+            if self._text_token_count(candidate, lang) <= max_tokens:
+                current = candidate
+                continue
+
+            if current:
+                batches.append(current)
+                current = ""
+
+            if self._text_token_count(word, lang) <= max_tokens:
+                current = word
+                continue
+
+            batches.extend(self._split_oversized_text_piece(word, lang, max_tokens))
+
+        if current:
+            batches.append(current)
+        return batches
+
+    def _split_oversized_text_piece(
+        self,
+        text: str,
+        lang: str,
+        max_tokens: int,
+    ) -> list[str]:
+        batches: list[str] = []
+        current = ""
+        for char in text:
+            candidate = current + char
+            if self._text_token_count(candidate, lang) <= max_tokens:
+                current = candidate
+                continue
+            if current:
+                batches.append(current)
+            current = char
+        if current:
+            batches.append(current)
+        return batches
+
+    def _text_token_count(self, text: str, lang: str) -> int:
+        phonemes = self._phonemize_cached(text, lang)
+        return len(self.kokoro.tokenizer.tokenize(phonemes))
 
 
 def silence_samples(seconds: float) -> np.ndarray:
