@@ -38,6 +38,7 @@ DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
+DEFAULT_STREAM_BOUNDARY_SILENCE_MS = 80
 DEFAULT_STREAM_MAX_SEGMENT_CHARS = None
 DEFAULT_STREAM_MAX_SEGMENT_WORDS = None
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
@@ -96,6 +97,7 @@ class Settings:
     profile_requests: bool
     stream_strategy: str
     stream_audio_frame_ms: int
+    stream_boundary_silence_ms: int
     stream_max_segment_chars: int | None
     stream_max_segment_words: int | None
     stream_schedule_max_segment_chars: int
@@ -279,6 +281,13 @@ class Settings:
                     str(DEFAULT_STREAM_AUDIO_FRAME_MS),
                 ),
                 name="FASTKOKORO_STREAM_AUDIO_FRAME_MS",
+            ),
+            stream_boundary_silence_ms=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_STREAM_BOUNDARY_SILENCE_MS",
+                    str(DEFAULT_STREAM_BOUNDARY_SILENCE_MS),
+                ),
+                name="FASTKOKORO_STREAM_BOUNDARY_SILENCE_MS",
             ),
             stream_max_segment_chars=parse_optional_positive_int(
                 os.getenv("FASTKOKORO_STREAM_MAX_SEGMENT_CHARS"),

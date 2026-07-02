@@ -191,6 +191,7 @@ Environment variables:
 | `FASTKOKORO_WARMUP_REQUEST` | `false` |
 | `FASTKOKORO_STREAM_STRATEGY` | `sentence` |
 | `FASTKOKORO_STREAM_AUDIO_FRAME_MS` | `200` |
+| `FASTKOKORO_STREAM_BOUNDARY_SILENCE_MS` | `80` |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_CHARS` | unset; scheduled strategies choose from bucket |
 | `FASTKOKORO_STREAM_MAX_SEGMENT_WORDS` | unset; scheduled strategies choose from bucket |
 | `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` | `150`; b48+ defaults to `220` unless explicitly set |
@@ -332,7 +333,11 @@ overrides for those scheduled strategies when configured. Static ONNX buckets
 still apply their safe token-width cap, so overrides cannot send more text than
 the checkpoint should handle. For `response_format=pcm`, the server also slices
 each generated segment into smaller audio frames controlled by
-`FASTKOKORO_STREAM_AUDIO_FRAME_MS`. Set
+`FASTKOKORO_STREAM_AUDIO_FRAME_MS` and inserts
+`FASTKOKORO_STREAM_BOUNDARY_SILENCE_MS` of silence between adjacent generated
+text segments to keep transitions from sounding glued together. Explicit
+`[pause:...]` segments control their own silence and do not receive extra
+boundary silence. Set
 `FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
 uses the local fastkokoro synthesis path instead of the upstream engine.
 

@@ -627,7 +627,8 @@ class FastKokoro:
             return
 
         used_ttfc_session = False
-        for segment in self._stream_text_control_segments(text, lang=resolved_lang):
+        stream_segments = self._stream_text_control_segments(text, lang=resolved_lang)
+        for index, segment in enumerate(stream_segments):
             if segment.pause_seconds is None:
                 ttfc_session = self.ttfc_session if not used_ttfc_session else None
                 if ttfc_session is not None:
@@ -669,6 +670,34 @@ class FastKokoro:
                 self.settings.stream_audio_frame_ms,
             ):
                 yield frame
+            if self._should_insert_stream_boundary_silence(stream_segments, index):
+                boundary_audio = encode_audio(
+                    silence_samples(
+                        self.settings.stream_boundary_silence_ms / 1000.0
+                    ),
+                    SAMPLE_RATE,
+                    response_format,
+                    use_pcm_jit=self.settings.jit,
+                )
+                for frame in split_pcm_frames(
+                    boundary_audio,
+                    self.settings.stream_audio_frame_ms,
+                ):
+                    yield frame
+
+    def _should_insert_stream_boundary_silence(
+        self,
+        segments: list[TextControlSegment],
+        index: int,
+    ) -> bool:
+        if self.settings.stream_boundary_silence_ms <= 0:
+            return False
+        if index >= len(segments) - 1:
+            return False
+        return (
+            segments[index].pause_seconds is None
+            and segments[index + 1].pause_seconds is None
+        )
 
     def _stream_schedule_limits(self) -> tuple[int, int]:
         providers = set(self.session.get_providers())

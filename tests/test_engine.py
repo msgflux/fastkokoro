@@ -71,6 +71,7 @@ def _settings(**overrides):
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=1,
+        stream_boundary_silence_ms=0,
         stream_max_segment_chars=None,
         stream_max_segment_words=None,
         stream_schedule_max_segment_chars=96,
@@ -271,6 +272,30 @@ async def test_sentence_stream_splits_text_and_pcm_frames():
     assert engine.kokoro.created_texts == ["Hello.", "World."]
     assert len(chunks) == 4
     assert all(len(chunk) == 48 for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_sentence_stream_inserts_boundary_silence_between_text_segments():
+    engine = _engine(
+        _settings(
+            stream_strategy="sentence",
+            stream_audio_frame_ms=1,
+            stream_boundary_silence_ms=1,
+        )
+    )
+
+    chunks = [
+        chunk
+        async for chunk in engine.create_stream(
+            "Hello. World.",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert len(chunks) == 5
+    assert chunks[2] == bytes(48)
 
 
 def test_sentence_stream_caps_static_bucket_word_capacity():

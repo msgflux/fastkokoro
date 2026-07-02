@@ -52,6 +52,7 @@ def _settings(**overrides):
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=200,
+        stream_boundary_silence_ms=0,
         stream_max_segment_chars=80,
         stream_max_segment_words=12,
         stream_schedule_max_segment_chars=96,
