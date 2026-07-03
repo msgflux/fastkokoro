@@ -99,15 +99,20 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             )
             active_frames = torch.minimum(active_frames, max_frames)
         active_samples = active_frames * self.output_samples_per_frame
-        if self.output_tail_margin_samples > 0:
-            active_samples = active_samples + self.output_tail_margin_samples
         max_samples = torch.tensor(
             sample_count,
             device=waveform.device,
             dtype=active_samples.dtype,
         )
         active_samples = torch.minimum(active_samples, max_samples)
-        positions = torch.arange(sample_count, device=waveform.device)
+        if self.output_tail_margin_samples > 0:
+            positions = torch.arange(
+                -self.output_tail_margin_samples,
+                sample_count - self.output_tail_margin_samples,
+                device=waveform.device,
+            )
+        else:
+            positions = torch.arange(sample_count, device=waveform.device)
         if self.output_fade_samples <= 0:
             return waveform * (positions < active_samples).to(waveform.dtype)
 
