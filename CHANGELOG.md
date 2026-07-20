@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-20
+
 ## [0.4.0] - 2026-06-25
 
 - Switched the default model repository to
