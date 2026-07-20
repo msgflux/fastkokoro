@@ -152,7 +152,7 @@ architecture, and provider option set. Keep `/models` mounted so
 build cost again.
 
 The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
-published only through the TensorRT 25.06 image. Current Python 3.12 ONNX
+published only through the TensorRT 25.06 image. Current Python 3.11 ONNX
 Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
 
 Final checkpoint measurements on a GTX 1650 (SM75) with CUDA I/O Binding:
