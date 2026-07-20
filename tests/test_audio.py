@@ -44,6 +44,39 @@ def test_trim_audio_part_numpy_path_uses_kokoro_trim():
     assert len(trimmed) > 0
 
 
+def test_trim_audio_part_padding_preserves_margin_around_trim_bounds():
+    samples = np.concatenate(
+        [
+            np.zeros(2048, dtype=np.float32),
+            np.ones(4096, dtype=np.float32),
+            np.zeros(2048, dtype=np.float32),
+        ]
+    )
+
+    trimmed = trim_audio_part(
+        samples,
+        use_jit=False,
+        sample_rate=1000,
+        padding_ms=512,
+    )
+    unpadded = trim_audio_part(samples, use_jit=False)
+
+    assert len(unpadded) < len(trimmed) < len(samples)
+
+
+def test_trim_audio_part_padding_clamps_to_original_bounds():
+    samples = np.ones(4096, dtype=np.float32)
+
+    trimmed = trim_audio_part(
+        samples,
+        use_jit=False,
+        sample_rate=1000,
+        padding_ms=512,
+    )
+
+    np.testing.assert_array_equal(trimmed, samples)
+
+
 def test_trim_audio_tail_removes_tail_and_fades_boundary():
     samples = np.ones(240, dtype=np.float32)
 

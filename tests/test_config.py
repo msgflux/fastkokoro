@@ -7,6 +7,7 @@ from fastkokoro.config import (
     DEFAULT_ONNX_IO_BINDING_DEVICE,
     DEFAULT_ONNX_TTFC_MODEL_PATH,
     DEFAULT_PROFILE,
+    DEFAULT_RUNTIME_PART_TRIM_PADDING_MS,
     DEFAULT_RUNTIME_TAIL_FADE_MS,
     DEFAULT_RUNTIME_TAIL_TRIM_MS,
     DEFAULT_STREAM_BOUNDARY_SILENCE_MS,
@@ -52,6 +53,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     monkeypatch.setenv("FASTKOKORO_WARMUP_REQUEST", "true")
     monkeypatch.setenv("FASTKOKORO_RUNTIME_TAIL_TRIM_MS", "120")
     monkeypatch.setenv("FASTKOKORO_RUNTIME_TAIL_FADE_MS", "48")
+    monkeypatch.setenv("FASTKOKORO_RUNTIME_PART_TRIM_PADDING_MS", "96")
     monkeypatch.setenv("FASTKOKORO_PROFILE", "true")
     monkeypatch.setenv("FASTKOKORO_PROFILE_DIR", "/tmp/profiles")
     monkeypatch.setenv("FASTKOKORO_PROFILE_WARMUP", "false")
@@ -91,6 +93,7 @@ def test_settings_parses_onnx_providers(monkeypatch):
     assert settings.warmup_request is True
     assert settings.runtime_tail_trim_ms == 120
     assert settings.runtime_tail_fade_ms == 48
+    assert settings.runtime_part_trim_padding_ms == 96
     assert settings.profile is True
     assert str(settings.profile_dir) == "/tmp/profiles"
     assert settings.profile_warmup is False
@@ -126,7 +129,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.onnx_adain_model_path is None
     assert settings.onnx_adain_custom_op_library is None
     assert settings.model_repo == "msgflux/Kokoro-82M-streaming-onnx"
-    assert settings.model_file == "onnx/kokoro-82m-streaming-b64-fp16.onnx"
+    assert settings.model_file == "onnx/kokoro-82m-streaming-b96-fp16.onnx"
     assert settings.voices_file == "voices.npz"
     assert settings.warmup_text == DEFAULT_WARMUP_TEXT
     assert settings.onnx_ttfc_model_path == DEFAULT_ONNX_TTFC_MODEL_PATH
@@ -134,6 +137,10 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.warmup_request is False
     assert settings.runtime_tail_trim_ms == DEFAULT_RUNTIME_TAIL_TRIM_MS
     assert settings.runtime_tail_fade_ms == DEFAULT_RUNTIME_TAIL_FADE_MS
+    assert (
+        settings.runtime_part_trim_padding_ms
+        == DEFAULT_RUNTIME_PART_TRIM_PADDING_MS
+    )
     assert settings.profile is DEFAULT_PROFILE
     assert settings.profile_warmup is DEFAULT_PROFILE
     assert settings.profile_requests is DEFAULT_PROFILE

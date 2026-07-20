@@ -43,6 +43,7 @@ def _settings(**overrides):
         warmup_request=False,
         runtime_tail_trim_ms=150,
         runtime_tail_fade_ms=72,
+        runtime_part_trim_padding_ms=80,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,

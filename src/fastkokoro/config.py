@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_MODEL_REPO = "msgflux/Kokoro-82M-streaming-onnx"
-DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b64-fp16.onnx"
+DEFAULT_MODEL_FILE = "onnx/kokoro-82m-streaming-b96-fp16.onnx"
 DEFAULT_VOICES_FILE = "voices.npz"
 DEFAULT_VOICES_INDEX_FILE = "voices.txt"
 DEFAULT_VOICE = "af_heart"
@@ -34,11 +34,12 @@ DEFAULT_WARMUP_TEXT = (
 )
 DEFAULT_RUNTIME_TAIL_TRIM_MS = 150
 DEFAULT_RUNTIME_TAIL_FADE_MS = 72
+DEFAULT_RUNTIME_PART_TRIM_PADDING_MS = 80
 DEFAULT_STREAM_STRATEGY = "sentence"
 DEFAULT_STREAM_ADAPTIVE_MAX_CHARS = 50
 DEFAULT_STREAM_ADAPTIVE_CPU_MAX_CHARS = 12
 DEFAULT_STREAM_AUDIO_FRAME_MS = 200
-DEFAULT_STREAM_BOUNDARY_SILENCE_MS = 80
+DEFAULT_STREAM_BOUNDARY_SILENCE_MS = 0
 DEFAULT_STREAM_MAX_SEGMENT_CHARS = None
 DEFAULT_STREAM_MAX_SEGMENT_WORDS = None
 DEFAULT_STREAM_SCHEDULE_MAX_SEGMENT_CHARS = 96
@@ -91,6 +92,7 @@ class Settings:
     warmup_request: bool
     runtime_tail_trim_ms: int
     runtime_tail_fade_ms: int
+    runtime_part_trim_padding_ms: int
     profile: bool
     profile_dir: Path
     profile_warmup: bool
@@ -243,6 +245,13 @@ class Settings:
                     str(DEFAULT_RUNTIME_TAIL_FADE_MS),
                 ),
                 name="FASTKOKORO_RUNTIME_TAIL_FADE_MS",
+            ),
+            runtime_part_trim_padding_ms=parse_non_negative_int(
+                os.getenv(
+                    "FASTKOKORO_RUNTIME_PART_TRIM_PADDING_MS",
+                    str(DEFAULT_RUNTIME_PART_TRIM_PADDING_MS),
+                ),
+                name="FASTKOKORO_RUNTIME_PART_TRIM_PADDING_MS",
             ),
             profile=profile_enabled,
             profile_dir=(

@@ -31,7 +31,7 @@ def main() -> None:
         default=None,
         help=(
             "NVCC gencode architecture, e.g. sm_86. Can be repeated. "
-            "Defaults to FASTKOKORO_CUDA_ARCH or sm_86."
+            "Defaults to FASTKOKORO_CUDA_ARCH or sm_75,sm_86."
         ),
     )
     parser.add_argument(
@@ -67,7 +67,7 @@ def build_cuda_adain_custom_op(
     *,
     output: Path | None = None,
     nvcc: str = "nvcc",
-    archs: tuple[str, ...] = ("sm_86",),
+    archs: tuple[str, ...] = ("sm_75", "sm_86"),
     ort_api_version: int = 18,
 ) -> Path:
     output = output or default_output_path(default_cache_dir())
@@ -150,7 +150,7 @@ def shared_library_suffix() -> str:
 
 def parse_archs(value: str | None) -> tuple[str, ...]:
     if not value:
-        return ("sm_86",)
+        return ("sm_75", "sm_86")
     return tuple(part.strip() for part in value.split(",") if part.strip())
 
 

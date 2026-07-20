@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import importlib.util
 import math
 import sys
 from collections import Counter
+from contextlib import suppress
 from pathlib import Path
 
 import onnx
 import torch
 import torch.nn.functional as functional
+from onnx import numpy_helper
 
 BLOCKED_TTFC_OPS = {"NonZero", "ScatterND", "STFT", "Range"}
 
@@ -24,6 +27,8 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         output_samples_per_frame: int | None = None,
         output_fade_samples: int = 0,
         output_tail_margin_samples: int = 0,
+        output_short_tail_margin_samples: int | None = None,
+        output_short_tail_margin_max_tokens: int | None = None,
         static_alignment: bool = False,
         length_aware: bool = False,
         internal_dtype: torch.dtype = torch.float32,
@@ -36,12 +41,38 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         self.output_samples_per_frame = output_samples_per_frame
         self.output_fade_samples = output_fade_samples
         self.output_tail_margin_samples = output_tail_margin_samples
+        self.output_short_tail_margin_samples = output_short_tail_margin_samples
+        self.output_short_tail_margin_max_tokens = (
+            output_short_tail_margin_max_tokens
+        )
         self.static_alignment = static_alignment
         self.length_aware = length_aware
         self.internal_dtype = internal_dtype
         self.decoder_dtype = decoder_dtype
+        self._fixed_output_padding_samples: int | None = None
+        self._fixed_output_crop_samples: int | None = None
 
     def forward(
+        self,
+        input_ids: torch.LongTensor,
+        ref_s: torch.FloatTensor,
+        speed: torch.Tensor,
+        input_lengths: torch.LongTensor | None = None,
+    ) -> tuple[torch.FloatTensor, torch.LongTensor]:
+        waveform, duration = self.synthesize(
+            input_ids,
+            ref_s,
+            speed,
+            input_lengths,
+        )
+        waveform = self.finalize_waveform(
+            waveform,
+            duration,
+            input_lengths=input_lengths,
+        )
+        return waveform.float(), duration
+
+    def synthesize(
         self,
         input_ids: torch.LongTensor,
         ref_s: torch.FloatTensor,
@@ -77,17 +108,58 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
                 ref_s,
                 speed,
             )
+        return waveform, duration
+
+    def configure_output_padding(self, native_output_samples: int) -> None:
+        if self.fixed_output_samples is None:
+            self._fixed_output_padding_samples = 0
+            self._fixed_output_crop_samples = 0
+            return
+        self._fixed_output_padding_samples = max(
+            self.fixed_output_samples - native_output_samples,
+            0,
+        )
+        self._fixed_output_crop_samples = max(
+            native_output_samples - self.fixed_output_samples,
+            0,
+        )
+
+    def finalize_waveform(
+        self,
+        waveform: torch.FloatTensor,
+        duration: torch.LongTensor,
+        input_lengths: torch.LongTensor | None = None,
+    ) -> torch.FloatTensor:
         if self.fixed_output_samples is not None:
-            waveform = functional.pad(waveform, (0, self.fixed_output_samples))
-            waveform = waveform[..., : self.fixed_output_samples]
+            padding_samples = self._fixed_output_padding_samples
+            if padding_samples is None:
+                padding_samples = max(
+                    self.fixed_output_samples - int(waveform.shape[-1]),
+                    0,
+                )
+            if padding_samples:
+                waveform = functional.pad(waveform, (0, padding_samples))
+            crop_samples = self._fixed_output_crop_samples
+            if crop_samples is None:
+                crop_samples = max(
+                    int(waveform.shape[-1]) - self.fixed_output_samples,
+                    0,
+                )
+            if padding_samples or crop_samples:
+                waveform = waveform[..., : self.fixed_output_samples]
             if self.output_samples_per_frame is not None:
-                waveform = self.mask_waveform_to_duration(waveform, duration)
-        return waveform.float(), duration
+                waveform = self.mask_waveform_to_duration(
+                    waveform,
+                    duration,
+                    input_lengths=input_lengths,
+                )
+        return waveform
 
     def mask_waveform_to_duration(
         self,
         waveform: torch.FloatTensor,
         duration: torch.LongTensor,
+        input_lengths: torch.LongTensor | None = None,
     ) -> torch.FloatTensor:
         sample_count = self.fixed_output_samples or waveform.shape[-1]
         active_frames = duration.sum()
@@ -105,6 +177,23 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             dtype=active_samples.dtype,
         )
         active_samples = torch.minimum(active_samples, max_samples)
+        if (
+            self.output_short_tail_margin_samples is not None
+            and self.output_short_tail_margin_max_tokens is not None
+            and input_lengths is not None
+        ):
+            short_margin_adjustment = torch.tensor(
+                self.output_short_tail_margin_samples
+                - self.output_tail_margin_samples,
+                device=waveform.device,
+                dtype=active_samples.dtype,
+            )
+            margin_adjustment = torch.where(
+                input_lengths[0] <= self.output_short_tail_margin_max_tokens,
+                short_margin_adjustment,
+                torch.zeros_like(short_margin_adjustment),
+            )
+            active_samples = active_samples + margin_adjustment
         if self.output_tail_margin_samples > 0:
             positions = torch.arange(
                 -self.output_tail_margin_samples,
@@ -277,6 +366,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-samples-per-frame", type=int)
     parser.add_argument("--output-fade-samples", type=int, default=0)
     parser.add_argument("--output-tail-margin-samples", type=int, default=0)
+    parser.add_argument("--output-short-tail-margin-samples", type=int)
+    parser.add_argument("--output-short-tail-margin-max-tokens", type=int)
     parser.add_argument(
         "--precision",
         default="fp32",
@@ -355,6 +446,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--fold-constant-reciprocals",
+        action="store_true",
+        help=(
+            "Replace Reciprocal nodes whose inputs are initializers with folded "
+            "initializers. This avoids unsupported fp16 constant folding in older "
+            "ONNX Runtime releases."
+        ),
+    )
+    parser.add_argument(
         "--device",
         default="cpu",
         choices=("cpu", "cuda"),
@@ -365,8 +465,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    if args.bucket <= 2:
-        raise ValueError("--bucket must leave room for start/end pad tokens")
+    validate_export_args(args)
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but torch.cuda.is_available() is false")
 
@@ -433,6 +532,10 @@ def main() -> int:
         output_samples_per_frame=args.output_samples_per_frame,
         output_fade_samples=args.output_fade_samples,
         output_tail_margin_samples=args.output_tail_margin_samples,
+        output_short_tail_margin_samples=args.output_short_tail_margin_samples,
+        output_short_tail_margin_max_tokens=(
+            args.output_short_tail_margin_max_tokens
+        ),
         static_alignment=args.static_alignment,
         length_aware=args.length_aware,
         internal_dtype=internal_dtype,
@@ -458,9 +561,20 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
-        waveform, duration = model(*export_args)
+        native_waveform, duration = model.synthesize(*export_args)
+        native_output_samples = int(native_waveform.shape[-1])
+        model.configure_output_padding(native_output_samples)
+        input_lengths = export_args[3] if len(export_args) > 3 else None
+        waveform = model.finalize_waveform(
+            native_waveform,
+            duration,
+            input_lengths=input_lengths,
+        ).float()
+    print(f"native_waveform_samples={native_output_samples}")
     print(f"torch_waveform_shape={tuple(waveform.shape)}")
     print(f"torch_duration_shape={tuple(duration.shape)}")
+    print_output_capacity_report(args, native_output_samples)
+    validate_output_geometry(args, native_output_samples)
 
     torch.onnx.export(
         model,
@@ -478,16 +592,262 @@ def main() -> int:
     exported = onnx.load(args.output)
     if args.patch_albert_sdpa_bool_mask_scale:
         cleanup_albert_sdpa_bool_mask_scale_export(exported)
-        onnx.save(exported, args.output)
+    folded_reciprocals = 0
+    if args.fold_constant_reciprocals:
+        folded_reciprocals = fold_constant_reciprocals(exported)
+    set_export_metadata(exported, args, native_output_samples)
     onnx.checker.check_model(exported)
+    onnx.save(exported, args.output)
     ops = Counter(node.op_type for node in exported.graph.node)
     print(f"onnx_path={args.output}")
     print(f"onnx_nodes={len(exported.graph.node)}")
     top_ops = ", ".join(f"{op}:{count}" for op, count in ops.most_common(20))
     print(f"onnx_top_ops={top_ops}")
+    print(f"folded_constant_reciprocals={folded_reciprocals}")
     blocked = {op: ops[op] for op in sorted(BLOCKED_TTFC_OPS) if ops[op]}
     print(f"blocked_ops={blocked}")
     return 2 if blocked else 0
+
+
+def validate_export_args(args: argparse.Namespace) -> None:
+    if args.bucket <= 2:
+        raise ValueError("--bucket must leave room for start/end pad tokens")
+    for name in (
+        "fixed_output_samples",
+        "fixed_alignment_frames",
+        "output_samples_per_frame",
+    ):
+        value = getattr(args, name)
+        if value is not None and value <= 0:
+            raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    for name in ("output_fade_samples", "output_tail_margin_samples"):
+        if getattr(args, name) < 0:
+            raise ValueError(f"--{name.replace('_', '-')} must be non-negative")
+    adaptive_margin_values = (
+        args.output_short_tail_margin_samples,
+        args.output_short_tail_margin_max_tokens,
+    )
+    if any(value is not None for value in adaptive_margin_values) and not all(
+        value is not None for value in adaptive_margin_values
+    ):
+        raise ValueError(
+            "adaptive short tail margin requires both "
+            "--output-short-tail-margin-samples and "
+            "--output-short-tail-margin-max-tokens"
+        )
+    if args.output_short_tail_margin_samples is not None:
+        if args.output_short_tail_margin_samples < 0:
+            raise ValueError(
+                "--output-short-tail-margin-samples must be non-negative"
+            )
+        if args.output_short_tail_margin_samples > args.output_tail_margin_samples:
+            raise ValueError(
+                "--output-short-tail-margin-samples cannot exceed "
+                "--output-tail-margin-samples"
+            )
+        if args.output_short_tail_margin_max_tokens <= 0:
+            raise ValueError(
+                "--output-short-tail-margin-max-tokens must be positive"
+            )
+        if not args.length_aware:
+            raise ValueError("adaptive short tail margin requires --length-aware")
+    if args.fixed_alignment_frames is not None and not (
+        args.length_aware or args.static_alignment
+    ):
+        raise ValueError(
+            "--fixed-alignment-frames requires --length-aware or --static-alignment"
+        )
+    if args.output_samples_per_frame is not None and args.fixed_output_samples is None:
+        raise ValueError("--output-samples-per-frame requires --fixed-output-samples")
+    if (args.output_fade_samples or args.output_tail_margin_samples) and (
+        args.output_samples_per_frame is None
+    ):
+        raise ValueError("output fade/tail masking requires --output-samples-per-frame")
+    if (
+        args.fixed_output_samples is not None
+        and args.output_tail_margin_samples > args.fixed_output_samples
+    ):
+        raise ValueError(
+            "--output-tail-margin-samples cannot exceed --fixed-output-samples"
+        )
+    source_patches = (
+        args.patch_deterministic_source,
+        args.patch_deterministic_sine_source,
+        args.patch_scatterless_sine_source,
+    )
+    if sum(source_patches) > 1:
+        raise ValueError("select at most one source patch")
+
+
+def print_output_capacity_report(
+    args: argparse.Namespace,
+    native_output_samples: int,
+) -> None:
+    fixed_output_samples = args.fixed_output_samples or native_output_samples
+    output_padding_samples = max(fixed_output_samples - native_output_samples, 0)
+    output_crop_samples = max(native_output_samples - fixed_output_samples, 0)
+    print(f"fixed_output_padding_samples={output_padding_samples}")
+    print(f"fixed_output_crop_samples={output_crop_samples}")
+
+    if args.fixed_alignment_frames is None or args.output_samples_per_frame is None:
+        return
+    aligned_content_samples = (
+        args.fixed_alignment_frames * args.output_samples_per_frame
+    )
+    native_samples_per_alignment_frame, native_remainder_samples = divmod(
+        native_output_samples,
+        args.fixed_alignment_frames,
+    )
+    print(
+        "native_samples_per_alignment_frame="
+        f"{native_samples_per_alignment_frame}"
+    )
+    print(f"native_alignment_remainder_samples={native_remainder_samples}")
+    print(f"content_mask_alignment_span_samples={aligned_content_samples}")
+    if args.output_samples_per_frame != native_samples_per_alignment_frame:
+        print(
+            "note=content mask samples per duration frame intentionally differs "
+            "from the native vocoder tensor ratio "
+            f"({args.output_samples_per_frame} != "
+            f"{native_samples_per_alignment_frame}); validate the suppressed "
+            "vocoder tail by listening"
+        )
+    available_active_samples = max(
+        fixed_output_samples - args.output_tail_margin_samples,
+        0,
+    )
+    safe_duration_frames = min(
+        args.fixed_alignment_frames,
+        available_active_samples // args.output_samples_per_frame,
+    )
+    print(f"safe_duration_frames={safe_duration_frames}")
+    if output_padding_samples:
+        print(
+            "warning=fixed output exceeds native vocoder output; the extra "
+            f"{output_padding_samples} samples are zeros"
+        )
+    if output_crop_samples:
+        print(
+            "note=fixed output suppresses the final "
+            f"{output_crop_samples} native vocoder tensor samples"
+        )
+
+
+def validate_output_geometry(
+    args: argparse.Namespace,
+    native_output_samples: int,
+) -> None:
+    if (
+        args.fixed_output_samples is None
+        or args.fixed_alignment_frames is None
+        or args.output_samples_per_frame is None
+    ):
+        return
+    maximum_masked_samples = (
+        args.fixed_alignment_frames * args.output_samples_per_frame
+        + args.output_tail_margin_samples
+    )
+    required_output_samples = min(native_output_samples, maximum_masked_samples)
+    if args.fixed_output_samples < required_output_samples:
+        raise ValueError(
+            "--fixed-output-samples is shorter than the reachable duration mask "
+            f"({args.fixed_output_samples} < {required_output_samples}); increase "
+            "the output length or reduce alignment/tail capacity"
+        )
+
+
+def fold_constant_reciprocals(model: onnx.ModelProto) -> int:
+    initializers = {
+        initializer.name: initializer for initializer in model.graph.initializer
+    }
+    folded_initializers = []
+    kept_nodes = []
+    folded = 0
+    for node in model.graph.node:
+        initializer = initializers.get(node.input[0]) if node.input else None
+        if (
+            node.op_type != "Reciprocal"
+            or node.domain
+            or initializer is None
+            or len(node.output) != 1
+            or node.output[0] in initializers
+        ):
+            kept_nodes.append(node)
+            continue
+        values = numpy_helper.to_array(initializer)
+        if values.dtype.kind != "f":
+            kept_nodes.append(node)
+            continue
+        reciprocal = (1.0 / values).astype(values.dtype)
+        folded_initializers.append(
+            numpy_helper.from_array(reciprocal, name=node.output[0])
+        )
+        folded += 1
+
+    if not folded:
+        return 0
+    del model.graph.node[:]
+    model.graph.node.extend(kept_nodes)
+    model.graph.initializer.extend(folded_initializers)
+    return folded
+
+
+def set_export_metadata(
+    model: onnx.ModelProto,
+    args: argparse.Namespace,
+    native_output_samples: int,
+) -> None:
+    metadata = {
+        "fastkokoro.bucket": str(args.bucket),
+        "fastkokoro.precision": args.precision,
+        "fastkokoro.opset": str(args.opset),
+        "fastkokoro.exporter": "legacy" if args.legacy_export else "dynamo",
+        "fastkokoro.native_output_samples": str(native_output_samples),
+        "fastkokoro.torch_version": torch.__version__,
+    }
+    optional_values = {
+        "fastkokoro.fixed_alignment_frames": args.fixed_alignment_frames,
+        "fastkokoro.fixed_output_samples": args.fixed_output_samples,
+        "fastkokoro.output_samples_per_frame": args.output_samples_per_frame,
+        "fastkokoro.output_tail_margin_samples": args.output_tail_margin_samples,
+        "fastkokoro.output_short_tail_margin_samples": (
+            args.output_short_tail_margin_samples
+        ),
+        "fastkokoro.output_short_tail_margin_max_tokens": (
+            args.output_short_tail_margin_max_tokens
+        ),
+        "fastkokoro.output_fade_samples": args.output_fade_samples,
+    }
+    if args.fixed_alignment_frames is not None:
+        native_ratio, native_remainder = divmod(
+            native_output_samples,
+            args.fixed_alignment_frames,
+        )
+        if native_remainder == 0:
+            optional_values[
+                "fastkokoro.native_samples_per_alignment_frame"
+            ] = native_ratio
+    if args.output_samples_per_frame is not None:
+        optional_values[
+            "fastkokoro.content_samples_per_duration_frame"
+        ] = args.output_samples_per_frame
+    metadata.update(
+        {key: str(value) for key, value in optional_values.items() if value is not None}
+    )
+    dependency_metadata = {
+        "transformers": "fastkokoro.transformers_version",
+        "onnx": "fastkokoro.onnx_version",
+        "numpy": "fastkokoro.numpy_version",
+        "huggingface-hub": "fastkokoro.huggingface_hub_version",
+        "loguru": "fastkokoro.loguru_version",
+        "misaki": "fastkokoro.misaki_version",
+    }
+    for package, key in dependency_metadata.items():
+        with suppress(importlib.metadata.PackageNotFoundError):
+            metadata[key] = importlib.metadata.version(package)
+    existing = {item.key: item.value for item in model.metadata_props}
+    existing.update(metadata)
+    onnx.helper.set_model_props(model, existing)
 
 
 def add_checkout_to_path(path: Path) -> None:

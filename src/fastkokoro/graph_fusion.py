@@ -5,8 +5,9 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import onnx
-from onnx import helper
+from onnx import TensorProto, helper
 
 from fastkokoro.config import Settings
 
@@ -89,6 +90,7 @@ def fuse_generator_adain(input_path: Path, output_path: Path) -> int:
             new_nodes.append(node)
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
+    _ensure_domain_opset(model, "fastkokoro", 1)
     onnx.save_model(model, output_path, save_as_external_data=True)
     return fused
 
@@ -143,6 +145,7 @@ def fuse_cuda_instance_adain(input_path: Path, output_path: Path) -> int:
             new_nodes.append(node)
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
+    _ensure_domain_opset(model, "fastkokoro", 1)
     onnx.save_model(model, output_path, save_as_external_data=True)
     return fused
 
@@ -198,6 +201,7 @@ def fuse_cuda_adain_snake(input_path: Path, output_path: Path) -> int:
             new_nodes.append(node)
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
+    _ensure_domain_opset(model, "fastkokoro", 1)
     onnx.save_model(model, output_path, save_as_external_data=True)
     return fused
 
@@ -244,8 +248,264 @@ def fuse_cuda_atan2(input_path: Path, output_path: Path) -> int:
             new_nodes.append(node)
     del model.graph.node[:]
     model.graph.node.extend(new_nodes)
+    _ensure_domain_opset(model, "fastkokoro", 1)
     onnx.save_model(model, output_path, save_as_external_data=True)
     return fused
+
+
+def fuse_portable_atan2(input_path: Path, output_path: Path) -> int:
+    """Replace the exported atan2 pattern with a CUDA-friendly ONNX polynomial."""
+    model = onnx.load(input_path)
+    producers: dict[str, onnx.NodeProto] = {}
+    consumers: dict[str, list[onnx.NodeProto]] = defaultdict(list)
+    for node in model.graph.node:
+        for name in node.output:
+            producers[name] = node
+        for name in node.input:
+            consumers[name].append(node)
+
+    remove: set[str] = set()
+    replacements: dict[str, list[onnx.NodeProto]] = {}
+    fused = 0
+    for node in model.graph.node:
+        if node.op_type != "Atan":
+            continue
+        match = _find_atan2_phase(node, producers, consumers)
+        if match is None:
+            continue
+        remove_nodes, imag_input, real_input, output_name = match
+        replacements[node.name] = _make_portable_atan2_nodes(
+            node.name + "_Atan2Poly",
+            imag_input,
+            real_input,
+            output_name,
+        )
+        remove.update(remove_nodes)
+        fused += 1
+
+    if fused == 0:
+        raise ValueError(f"No atan2 phase pattern found in ONNX model: {input_path}")
+
+    new_nodes = []
+    for node in model.graph.node:
+        replacement = replacements.get(node.name)
+        if replacement is not None:
+            new_nodes.extend(replacement)
+        elif node.name not in remove:
+            new_nodes.append(node)
+    del model.graph.node[:]
+    model.graph.node.extend(new_nodes)
+    onnx.save_model(model, output_path)
+    return fused
+
+
+def _ensure_domain_opset(
+    model: onnx.ModelProto,
+    domain: str,
+    version: int,
+) -> None:
+    if not any(opset.domain == domain for opset in model.opset_import):
+        model.opset_import.append(helper.make_opsetid(domain, version))
+
+
+def _make_portable_atan2_nodes(
+    prefix: str,
+    imag_input: str,
+    real_input: str,
+    output_name: str,
+) -> list[onnx.NodeProto]:
+    def name(suffix: str) -> str:
+        return f"{prefix}/{suffix}"
+
+    def constant(suffix: str, value: float) -> onnx.NodeProto:
+        return helper.make_node(
+            "Constant",
+            inputs=[],
+            outputs=[name(suffix)],
+            name=name(f"Constant_{suffix}"),
+            value=helper.make_tensor(
+                name=f"{suffix}_value",
+                data_type=TensorProto.FLOAT,
+                dims=[],
+                vals=[value],
+            ),
+        )
+
+    nodes = [
+        helper.make_node(
+            "Cast",
+            [imag_input],
+            [name("imag_f32")],
+            name=name("CastImag"),
+            to=TensorProto.FLOAT,
+        ),
+        helper.make_node(
+            "Cast",
+            [real_input],
+            [name("real_f32")],
+            name=name("CastReal"),
+            to=TensorProto.FLOAT,
+        ),
+        helper.make_node(
+            "Abs", [name("imag_f32")], [name("abs_imag")], name=name("AbsImag")
+        ),
+        helper.make_node(
+            "Abs", [name("real_f32")], [name("abs_real")], name=name("AbsReal")
+        ),
+        helper.make_node(
+            "Min",
+            [name("abs_imag"), name("abs_real")],
+            [name("min_abs")],
+            name=name("MinAbs"),
+        ),
+        helper.make_node(
+            "Max",
+            [name("abs_imag"), name("abs_real")],
+            [name("max_abs")],
+            name=name("MaxAbs"),
+        ),
+        constant("epsilon", np.finfo(np.float32).tiny),
+        helper.make_node(
+            "Max",
+            [name("max_abs"), name("epsilon")],
+            [name("denominator")],
+            name=name("SafeDenominator"),
+        ),
+        helper.make_node(
+            "Div",
+            [name("min_abs"), name("denominator")],
+            [name("ratio")],
+            name=name("Ratio"),
+        ),
+        helper.make_node(
+            "Mul",
+            [name("ratio"), name("ratio")],
+            [name("ratio_squared")],
+            name=name("RatioSquared"),
+        ),
+        constant("coefficient_3", -0.0464964749),
+        helper.make_node(
+            "Mul",
+            [name("coefficient_3"), name("ratio_squared")],
+            [name("polynomial_3")],
+            name=name("Polynomial3Mul"),
+        ),
+        constant("coefficient_2", 0.15931422),
+        helper.make_node(
+            "Add",
+            [name("polynomial_3"), name("coefficient_2")],
+            [name("polynomial_2_bias")],
+            name=name("Polynomial2Add"),
+        ),
+        helper.make_node(
+            "Mul",
+            [name("polynomial_2_bias"), name("ratio_squared")],
+            [name("polynomial_2")],
+            name=name("Polynomial2Mul"),
+        ),
+        constant("coefficient_1", -0.327622764),
+        helper.make_node(
+            "Add",
+            [name("polynomial_2"), name("coefficient_1")],
+            [name("polynomial_1_bias")],
+            name=name("Polynomial1Add"),
+        ),
+        helper.make_node(
+            "Mul",
+            [name("polynomial_1_bias"), name("ratio_squared")],
+            [name("polynomial_1")],
+            name=name("Polynomial1Mul"),
+        ),
+        helper.make_node(
+            "Mul",
+            [name("polynomial_1"), name("ratio")],
+            [name("polynomial_ratio")],
+            name=name("PolynomialRatioMul"),
+        ),
+        helper.make_node(
+            "Add",
+            [name("polynomial_ratio"), name("ratio")],
+            [name("atan_ratio")],
+            name=name("AtanRatioAdd"),
+        ),
+        helper.make_node(
+            "Greater",
+            [name("abs_imag"), name("abs_real")],
+            [name("imag_larger")],
+            name=name("ImagLarger"),
+        ),
+        constant("half_pi", float(np.pi / 2.0)),
+        helper.make_node(
+            "Sub",
+            [name("half_pi"), name("atan_ratio")],
+            [name("complement")],
+            name=name("Complement"),
+        ),
+        helper.make_node(
+            "Where",
+            [name("imag_larger"), name("complement"), name("atan_ratio")],
+            [name("first_quadrant")],
+            name=name("FirstQuadrant"),
+        ),
+        constant("zero", 0.0),
+        helper.make_node(
+            "Less",
+            [name("real_f32"), name("zero")],
+            [name("real_negative")],
+            name=name("RealNegative"),
+        ),
+        constant("pi", float(np.pi)),
+        helper.make_node(
+            "Sub",
+            [name("pi"), name("first_quadrant")],
+            [name("left_quadrants")],
+            name=name("LeftQuadrants"),
+        ),
+        helper.make_node(
+            "Where",
+            [name("real_negative"), name("left_quadrants"), name("first_quadrant")],
+            [name("unsigned_phase")],
+            name=name("UnsignedPhase"),
+        ),
+        helper.make_node(
+            "Less",
+            [name("imag_f32"), name("zero")],
+            [name("imag_negative")],
+            name=name("ImagNegative"),
+        ),
+        helper.make_node(
+            "Neg",
+            [name("unsigned_phase")],
+            [name("negative_phase")],
+            name=name("NegativePhase"),
+        ),
+        helper.make_node(
+            "Where",
+            [name("imag_negative"), name("negative_phase"), name("unsigned_phase")],
+            [name("signed_phase")],
+            name=name("SignedPhase"),
+        ),
+        helper.make_node(
+            "Equal",
+            [name("max_abs"), name("zero")],
+            [name("both_zero")],
+            name=name("BothZero"),
+        ),
+        helper.make_node(
+            "Where",
+            [name("both_zero"), name("zero"), name("signed_phase")],
+            [name("phase_f32")],
+            name=name("ZeroPhase"),
+        ),
+        helper.make_node(
+            "Cast",
+            [name("phase_f32")],
+            [output_name],
+            name=name("CastOutput"),
+            to=TensorProto.FLOAT16,
+        ),
+    ]
+    return nodes
 
 
 def _match_adain(

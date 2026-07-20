@@ -87,6 +87,7 @@ def _settings(**overrides):
         warmup_request=False,
         runtime_tail_trim_ms=150,
         runtime_tail_fade_ms=72,
+        runtime_part_trim_padding_ms=80,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,
@@ -149,6 +150,33 @@ def test_resolve_cpu_simplified_model_path_generates_cached_model(tmp_path):
     model_path = tmp_path / "model.onnx"
     model_path.write_bytes(b"onnx")
     cached = tmp_path / "cache" / "model.sim.onnx"
+
+    with (
+        patch(
+            "fastkokoro.onnx_simplification._simplified_cache_path",
+            return_value=cached,
+        ),
+        patch(
+            "fastkokoro.onnx_simplification.simplify_onnx_model",
+            return_value=cached,
+        ) as simplify,
+    ):
+        result = resolve_cpu_simplified_model_path(
+            model_path,
+            _settings(cache_dir=tmp_path / "cache"),
+            ["CPUExecutionProvider"],
+        )
+
+    assert result == cached
+    simplify.assert_called_once_with(model_path, cached)
+
+
+def test_resolve_cpu_simplified_model_path_regenerates_invalid_cache(tmp_path):
+    model_path = tmp_path / "model.onnx"
+    model_path.write_bytes(b"onnx")
+    cached = tmp_path / "cache" / "model.sim.onnx"
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"not an onnx model")
 
     with (
         patch(
