@@ -137,10 +137,7 @@ def test_settings_defaults_to_cpu_provider(monkeypatch):
     assert settings.warmup_request is False
     assert settings.runtime_tail_trim_ms == DEFAULT_RUNTIME_TAIL_TRIM_MS
     assert settings.runtime_tail_fade_ms == DEFAULT_RUNTIME_TAIL_FADE_MS
-    assert (
-        settings.runtime_part_trim_padding_ms
-        == DEFAULT_RUNTIME_PART_TRIM_PADDING_MS
-    )
+    assert settings.runtime_part_trim_padding_ms == DEFAULT_RUNTIME_PART_TRIM_PADDING_MS
     assert settings.profile is DEFAULT_PROFILE
     assert settings.profile_warmup is DEFAULT_PROFILE
     assert settings.profile_requests is DEFAULT_PROFILE

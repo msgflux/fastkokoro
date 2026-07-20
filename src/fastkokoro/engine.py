@@ -887,9 +887,7 @@ class FastKokoro:
                 yield frame
             if self._should_insert_stream_boundary_silence(stream_segments, index):
                 boundary_audio = encode_audio(
-                    silence_samples(
-                        self.settings.stream_boundary_silence_ms / 1000.0
-                    ),
+                    silence_samples(self.settings.stream_boundary_silence_ms / 1000.0),
                     SAMPLE_RATE,
                     response_format,
                     use_pcm_jit=self.settings.jit,

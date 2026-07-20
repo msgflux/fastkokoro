@@ -42,9 +42,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         self.output_fade_samples = output_fade_samples
         self.output_tail_margin_samples = output_tail_margin_samples
         self.output_short_tail_margin_samples = output_short_tail_margin_samples
-        self.output_short_tail_margin_max_tokens = (
-            output_short_tail_margin_max_tokens
-        )
+        self.output_short_tail_margin_max_tokens = output_short_tail_margin_max_tokens
         self.static_alignment = static_alignment
         self.length_aware = length_aware
         self.internal_dtype = internal_dtype
@@ -183,8 +181,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             and input_lengths is not None
         ):
             short_margin_adjustment = torch.tensor(
-                self.output_short_tail_margin_samples
-                - self.output_tail_margin_samples,
+                self.output_short_tail_margin_samples - self.output_tail_margin_samples,
                 device=waveform.device,
                 dtype=active_samples.dtype,
             )
@@ -533,9 +530,7 @@ def main() -> int:
         output_fade_samples=args.output_fade_samples,
         output_tail_margin_samples=args.output_tail_margin_samples,
         output_short_tail_margin_samples=args.output_short_tail_margin_samples,
-        output_short_tail_margin_max_tokens=(
-            args.output_short_tail_margin_max_tokens
-        ),
+        output_short_tail_margin_max_tokens=(args.output_short_tail_margin_max_tokens),
         static_alignment=args.static_alignment,
         length_aware=args.length_aware,
         internal_dtype=internal_dtype,
@@ -637,18 +632,14 @@ def validate_export_args(args: argparse.Namespace) -> None:
         )
     if args.output_short_tail_margin_samples is not None:
         if args.output_short_tail_margin_samples < 0:
-            raise ValueError(
-                "--output-short-tail-margin-samples must be non-negative"
-            )
+            raise ValueError("--output-short-tail-margin-samples must be non-negative")
         if args.output_short_tail_margin_samples > args.output_tail_margin_samples:
             raise ValueError(
                 "--output-short-tail-margin-samples cannot exceed "
                 "--output-tail-margin-samples"
             )
         if args.output_short_tail_margin_max_tokens <= 0:
-            raise ValueError(
-                "--output-short-tail-margin-max-tokens must be positive"
-            )
+            raise ValueError("--output-short-tail-margin-max-tokens must be positive")
         if not args.length_aware:
             raise ValueError("adaptive short tail margin requires --length-aware")
     if args.fixed_alignment_frames is not None and not (
@@ -698,10 +689,7 @@ def print_output_capacity_report(
         native_output_samples,
         args.fixed_alignment_frames,
     )
-    print(
-        "native_samples_per_alignment_frame="
-        f"{native_samples_per_alignment_frame}"
-    )
+    print(f"native_samples_per_alignment_frame={native_samples_per_alignment_frame}")
     print(f"native_alignment_remainder_samples={native_remainder_samples}")
     print(f"content_mask_alignment_span_samples={aligned_content_samples}")
     if args.output_samples_per_frame != native_samples_per_alignment_frame:
@@ -824,13 +812,13 @@ def set_export_metadata(
             args.fixed_alignment_frames,
         )
         if native_remainder == 0:
-            optional_values[
-                "fastkokoro.native_samples_per_alignment_frame"
-            ] = native_ratio
+            optional_values["fastkokoro.native_samples_per_alignment_frame"] = (
+                native_ratio
+            )
     if args.output_samples_per_frame is not None:
-        optional_values[
-            "fastkokoro.content_samples_per_duration_frame"
-        ] = args.output_samples_per_frame
+        optional_values["fastkokoro.content_samples_per_duration_frame"] = (
+            args.output_samples_per_frame
+        )
     metadata.update(
         {key: str(value) for key, value in optional_values.items() if value is not None}
     )

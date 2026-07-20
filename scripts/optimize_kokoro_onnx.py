@@ -112,8 +112,7 @@ def main() -> int:
     onnx.checker.check_model(str(args.output), full_check=False)
     final_model = onnx.load(args.output, load_external_data=False)
     operators = Counter(
-        f"{node.domain or 'ai.onnx'}::{node.op_type}"
-        for node in final_model.graph.node
+        f"{node.domain or 'ai.onnx'}::{node.op_type}" for node in final_model.graph.node
     )
     report.update(
         {
