@@ -36,15 +36,31 @@ def _encode_pcm(samples: np.ndarray, *, use_pcm_jit: bool) -> bytes:
 
 
 def trim_audio_part(
-    samples: np.ndarray, *, use_jit: bool, top_db: float = 60.0
+    samples: np.ndarray,
+    *,
+    use_jit: bool,
+    top_db: float = 60.0,
+    sample_rate: int = 24000,
+    padding_ms: int = 0,
 ) -> np.ndarray:
     samples_f32 = np.asarray(samples, dtype=np.float32)
     if samples_f32.ndim != 1:
         trimmed, _ = kokoro_trim_audio(samples_f32)
         return trimmed
 
-    trimmed, _ = kokoro_trim_audio(samples_f32, top_db=top_db, use_jit=use_jit)
-    return trimmed
+    trimmed, bounds = kokoro_trim_audio(samples_f32, top_db=top_db, use_jit=use_jit)
+    if padding_ms <= 0:
+        return trimmed
+
+    padding_samples = int(sample_rate * padding_ms / 1000)
+    if padding_samples <= 0:
+        return trimmed
+
+    start = max(0, int(bounds[0]) - padding_samples)
+    end = min(samples_f32.shape[0], int(bounds[1]) + padding_samples)
+    if start >= end:
+        return trimmed
+    return samples_f32[start:end]
 
 
 def trim_audio_tail(

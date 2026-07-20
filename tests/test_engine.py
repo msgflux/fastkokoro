@@ -63,6 +63,7 @@ def _settings(**overrides):
         warmup_request=False,
         runtime_tail_trim_ms=150,
         runtime_tail_fade_ms=72,
+        runtime_part_trim_padding_ms=80,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,
@@ -71,8 +72,9 @@ def _settings(**overrides):
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=1,
-        stream_max_segment_chars=80,
-        stream_max_segment_words=12,
+        stream_boundary_silence_ms=0,
+        stream_max_segment_chars=None,
+        stream_max_segment_words=None,
         stream_schedule_max_segment_chars=96,
         stream_schedule_max_segment_words=12,
         stream_cpu_schedule_max_segment_chars=48,
@@ -163,13 +165,22 @@ def _set_providers(engine, providers):
     )
 
 
-def test_stream_initial_schedule_limits_scale_with_bucket():
-    engine = _engine(
-        _settings(
-            stream_max_segment_chars=24,
-            stream_max_segment_words=2,
-        )
+def _set_static_token_width(engine, width):
+    input_names = frozenset({"input_ids", "style", "speed", "input_lengths"})
+    engine._onnx_input_names = input_names
+    engine._token_input_name = "input_ids"
+    engine._token_input_width = width
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=input_names,
+        output_name="audio",
+        token_input_name=engine._token_input_name,
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
     )
+
+
+def test_stream_initial_schedule_limits_scale_with_bucket():
+    engine = _engine(_settings())
 
     cases = [
         (16, (24, 1)),
@@ -197,6 +208,73 @@ def test_stream_initial_schedule_limits_respect_explicit_settings():
     assert engine._stream_initial_schedule_limits(96, 12) == (80, 3)
 
 
+def test_stream_schedule_limits_cap_fixed_bucket_word_capacity():
+    engine = _engine(
+        _settings(
+            stream_schedule_max_segment_chars=96,
+            stream_schedule_max_segment_words=12,
+        )
+    )
+    _set_providers(engine, ["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+    _set_static_token_width(engine, 24)
+    assert engine._stream_schedule_limits() == (48, 3)
+
+    _set_static_token_width(engine, 48)
+    assert engine._stream_schedule_limits() == (96, 6)
+
+
+def test_stream_initial_schedule_limits_cap_explicit_settings_to_bucket_capacity():
+    engine = _engine(
+        _settings(
+            stream_max_segment_chars=120,
+            stream_max_segment_words=12,
+        )
+    )
+    _set_static_token_width(engine, 48)
+
+    assert engine._stream_initial_schedule_limits(120, 12) == (96, 6)
+
+
+def test_runtime_tail_trim_scales_with_bucket():
+    engine = _engine(_settings(runtime_tail_trim_ms=150, runtime_tail_fade_ms=72))
+
+    engine._token_input_width = 24
+    assert engine._runtime_tail_trim_ms() == 150
+    assert engine._runtime_tail_fade_ms() == 72
+
+    engine._token_input_width = 48
+    assert engine._runtime_tail_trim_ms() == 220
+    assert engine._runtime_tail_fade_ms() == 96
+
+
+def test_runtime_tail_trim_respects_explicit_settings():
+    engine = _engine(_settings(runtime_tail_trim_ms=180, runtime_tail_fade_ms=80))
+    engine._token_input_width = 48
+
+    assert engine._runtime_tail_trim_ms() == 180
+    assert engine._runtime_tail_fade_ms() == 80
+
+
+def test_runtime_part_trim_keeps_configured_padding_for_small_buckets():
+    engine = _engine(_settings(runtime_part_trim_padding_ms=80))
+    engine._token_input_width = 48
+
+    assert engine._runtime_part_trim_padding_ms() == 80
+
+
+def test_create_samples_rejects_speed_below_one():
+    engine = _engine(_settings())
+
+    with pytest.raises(AssertionError, match="between 1.0 and 2.0"):
+        engine._create_samples(
+            "hello",
+            voice=engine._voice_styles["af_heart"],
+            speed=0.5,
+            lang="en-us",
+        )
+
+
 @pytest.mark.asyncio
 async def test_sentence_stream_splits_text_and_pcm_frames():
     engine = _engine(_settings(stream_strategy="sentence", stream_audio_frame_ms=1))
@@ -214,6 +292,45 @@ async def test_sentence_stream_splits_text_and_pcm_frames():
     assert engine.kokoro.created_texts == ["Hello.", "World."]
     assert len(chunks) == 4
     assert all(len(chunk) == 48 for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_sentence_stream_inserts_boundary_silence_between_text_segments():
+    engine = _engine(
+        _settings(
+            stream_strategy="sentence",
+            stream_audio_frame_ms=1,
+            stream_boundary_silence_ms=1,
+        )
+    )
+
+    chunks = [
+        chunk
+        async for chunk in engine.create_stream(
+            "Hello. World.",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert len(chunks) == 5
+    assert chunks[2] == bytes(48)
+
+
+def test_sentence_stream_caps_static_bucket_word_capacity():
+    engine = _engine(_settings(stream_strategy="sentence", stream_audio_frame_ms=1))
+    _set_static_token_width(engine, 64)
+
+    segments = engine._stream_text_control_segments(
+        "one two three four five six seven eight.",
+        lang="en-us",
+    )
+
+    assert [segment.text for segment in segments] == [
+        "one two three four five six",
+        "seven eight.",
+    ]
 
 
 @pytest.mark.asyncio
@@ -359,8 +476,6 @@ async def test_adaptive_stream_scales_initial_segment_with_gpu_bucket():
         _settings(
             stream_strategy="adaptive",
             stream_audio_frame_ms=1,
-            stream_max_segment_chars=24,
-            stream_max_segment_words=2,
             stream_schedule_max_segment_chars=96,
             stream_schedule_max_segment_words=12,
         )
@@ -389,6 +504,65 @@ async def test_adaptive_stream_scales_initial_segment_with_gpu_bucket():
         ),
         "nineteen",
     ]
+
+
+def test_stream_text_segments_respect_static_onnx_token_width():
+    engine = _engine(
+        _settings(
+            stream_strategy="adaptive",
+            stream_adaptive_max_chars=50,
+        )
+    )
+    _set_static_token_width(engine, 8)
+
+    segments = engine._stream_text_control_segments(
+        "one two three",
+        lang="en-us",
+    )
+
+    assert [segment.text for segment in segments] == ["one", "two", "three"]
+    assert all(
+        engine._text_token_count(segment.text, "en-us") <= 6 for segment in segments
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_never_sends_more_tokens_than_fixed_onnx_width():
+    observed_input_lengths = []
+    engine = _engine(
+        _settings(
+            stream_strategy="adaptive",
+            stream_adaptive_max_chars=50,
+        )
+    )
+    _set_static_token_width(engine, 8)
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        get_inputs=lambda: [
+            SimpleNamespace(name="input_ids", shape=[1, 8]),
+            SimpleNamespace(name="style"),
+            SimpleNamespace(name="speed"),
+            SimpleNamespace(name="input_lengths"),
+        ],
+        get_outputs=lambda: [SimpleNamespace(name="audio")],
+        run=lambda output_names, inputs: (
+            observed_input_lengths.append(int(inputs["input_lengths"][0]))
+            or [np.ones(48, dtype=np.float32)]
+        ),
+    )
+
+    [
+        chunk
+        async for chunk in engine.create_stream(
+            "one two three",
+            voice="af_heart",
+            lang="en-us",
+            response_format="pcm",
+        )
+    ]
+
+    assert observed_input_lengths == [5, 5, 7]
+    assert all(length <= 8 for length in observed_input_lengths)
 
 
 def test_create_uses_cached_onnx_input_names():
@@ -683,6 +857,123 @@ def test_split_for_onnx_token_width_splits_oversized_piece():
     )
 
     assert engine._split_for_onnx_token_width("abcdef") == ["abc", "def"]
+
+
+def test_split_for_onnx_token_width_prefers_punctuation_boundary():
+    engine = _engine(_settings())
+    engine._onnx_input_names = frozenset({"input_ids"})
+    engine._token_input_width = 14
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=engine._onnx_input_names,
+        output_name="audio",
+        token_input_name="input_ids",
+        token_input_width=engine._token_input_width,
+        token_input_static=True,
+    )
+
+    assert engine._split_for_onnx_token_width("aaaa, bbbb cccc") == [
+        "aaaa,",
+        "bbbb cccc",
+    ]
+
+
+def test_session_profile_reserves_tail_frames_from_export_metadata():
+    engine = _engine(_settings())
+    session = SimpleNamespace(
+        get_inputs=lambda: [SimpleNamespace(name="input_ids", shape=[1, 96])],
+        get_outputs=lambda: [
+            SimpleNamespace(name="waveform"),
+            SimpleNamespace(name="duration"),
+        ],
+        get_modelmeta=lambda: SimpleNamespace(
+            custom_metadata_map={
+                "fastkokoro.fixed_alignment_frames": "272",
+                "fastkokoro.fixed_output_samples": "163200",
+                "fastkokoro.output_samples_per_frame": "600",
+                "fastkokoro.output_tail_margin_samples": "8400",
+            }
+        ),
+    )
+
+    profile = engine._build_onnx_session_profile(session)
+
+    assert profile.duration_output_name == "duration"
+    assert profile.safe_duration_frames == 258
+
+
+def test_session_profile_distinguishes_content_mask_from_native_ratio():
+    engine = _engine(_settings())
+    session = SimpleNamespace(
+        get_inputs=lambda: [SimpleNamespace(name="input_ids", shape=[1, 96])],
+        get_outputs=lambda: [
+            SimpleNamespace(name="waveform"),
+            SimpleNamespace(name="duration"),
+        ],
+        get_modelmeta=lambda: SimpleNamespace(
+            custom_metadata_map={
+                "fastkokoro.fixed_alignment_frames": "200",
+                "fastkokoro.fixed_output_samples": "108000",
+                "fastkokoro.content_samples_per_duration_frame": "480",
+                "fastkokoro.native_samples_per_alignment_frame": "600",
+                "fastkokoro.output_tail_margin_samples": "12000",
+            }
+        ),
+    )
+
+    profile = engine._build_onnx_session_profile(session)
+
+    assert profile.safe_duration_frames == 200
+
+
+def test_duration_overflow_retries_smaller_phoneme_batches(monkeypatch):
+    engine = _engine(
+        _settings(
+            runtime_tail_trim_ms=0,
+            runtime_tail_fade_ms=0,
+            runtime_part_trim_padding_ms=0,
+        )
+    )
+    input_names = frozenset({"input_ids", "style", "speed", "input_lengths"})
+    engine._onnx_profile = OnnxSessionProfile(
+        input_names=input_names,
+        output_name="waveform",
+        token_input_name="input_ids",
+        token_input_width=96,
+        token_input_static=True,
+        duration_output_name="duration",
+        safe_duration_frames=258,
+    )
+    engine._token_input_width = 96
+    token_counts = []
+
+    def run(output_names, inputs):
+        assert output_names == ["waveform", "duration"]
+        token_count = int(inputs["input_lengths"][0]) - 2
+        token_counts.append(token_count)
+        if token_count > 5:
+            return [np.full(12, 9.0, dtype=np.float32), np.array([259])]
+        return [
+            np.full(3, float(token_count), dtype=np.float32),
+            np.array([100]),
+        ]
+
+    engine.session = SimpleNamespace(
+        get_providers=lambda: ["CPUExecutionProvider"],
+        run=run,
+    )
+    monkeypatch.setattr(engine, "_trim_audio_part", lambda samples: samples)
+
+    audio = engine._run_onnx_audio(
+        "aaaa bbbb",
+        engine._voice_styles["af_heart"],
+        1.0,
+    )
+
+    assert token_counts == [9, 4, 4]
+    np.testing.assert_array_equal(
+        audio,
+        np.full(6, 4.0, dtype=np.float32),
+    )
 
 
 def test_create_samples_with_buffer_pool_grows_and_merges(monkeypatch):

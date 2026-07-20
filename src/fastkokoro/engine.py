@@ -16,8 +16,8 @@ except ModuleNotFoundError:
 from fastkokoro.assets import resolve_model_path, resolve_voices_path
 from fastkokoro.audio import AudioFormat, encode_audio, trim_audio_part, trim_audio_tail
 from fastkokoro.config import (
-    DEFAULT_STREAM_MAX_SEGMENT_CHARS,
-    DEFAULT_STREAM_MAX_SEGMENT_WORDS,
+    DEFAULT_RUNTIME_TAIL_FADE_MS,
+    DEFAULT_RUNTIME_TAIL_TRIM_MS,
     Settings,
 )
 from fastkokoro.graph_fusion import resolve_adain_fused_model_path
@@ -63,10 +63,40 @@ def _resolve_token_input_shape(inputs, input_name: str) -> tuple[int, bool]:
     return MAX_PHONEME_LENGTH + 2, False
 
 
+def _onnx_custom_metadata(session) -> dict[str, str]:
+    try:
+        return dict(session.get_modelmeta().custom_metadata_map)
+    except (AttributeError, RuntimeError, TypeError):
+        return {}
+
+
+def _positive_metadata_int(metadata: dict[str, str], key: str) -> int | None:
+    value = _non_negative_metadata_int(metadata, key)
+    return value if value is not None and value > 0 else None
+
+
+def _non_negative_metadata_int(metadata: dict[str, str], key: str) -> int | None:
+    try:
+        value = int(metadata[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
 OUTPUT_BUFFER_POOL_SIZES = (8192, 16384, 32768, 65536)
 PAUSE_TAG_PATTERN = re.compile(r"\[pause:(\d+(?:\.\d+)?)s\]", re.IGNORECASE)
 PHONEME_PUNCTUATION = ".,!?;:\u2026\u2014"
 PHONEME_BREAK_PRIORITY = ("!.?\u2026", ":;", ",\u2014")
+STATIC_BUCKET_WORD_CAPACITY = {
+    16: 1,
+    24: 3,
+    32: 5,
+    48: 6,
+    64: 6,
+    96: 14,
+    128: 18,
+}
+SCHEDULER_MIN_SEGMENT_CHARS = 24
 
 _PHONEMIZE_CACHE_MAXSIZE = 128
 
@@ -86,6 +116,8 @@ class OnnxSessionProfile:
     token_input_name: str
     token_input_width: int
     token_input_static: bool
+    duration_output_name: str | None = None
+    safe_duration_frames: int | None = None
 
 
 @dataclass(frozen=True)
@@ -150,17 +182,60 @@ class FastKokoro:
 
     def _build_onnx_session_profile(self, session) -> OnnxSessionProfile:
         input_names = frozenset(item.name for item in session.get_inputs())
+        output_names = tuple(item.name for item in session.get_outputs())
         token_input_name = "input_ids" if "input_ids" in input_names else "tokens"
         token_input_width, token_input_static = _resolve_token_input_shape(
             session.get_inputs(),
             token_input_name,
         )
+        metadata = _onnx_custom_metadata(session)
+        alignment_frames = _positive_metadata_int(
+            metadata,
+            "fastkokoro.fixed_alignment_frames",
+        )
+        samples_per_frame = _positive_metadata_int(
+            metadata,
+            "fastkokoro.content_samples_per_duration_frame",
+        )
+        if samples_per_frame is None:
+            samples_per_frame = _positive_metadata_int(
+                metadata,
+                "fastkokoro.output_samples_per_frame",
+            )
+        fixed_output_samples = _positive_metadata_int(
+            metadata,
+            "fastkokoro.fixed_output_samples",
+        )
+        tail_margin_samples = _non_negative_metadata_int(
+            metadata,
+            "fastkokoro.output_tail_margin_samples",
+        )
+        duration_output_name = "duration" if "duration" in output_names else None
+        safe_duration_frames = None
+        if (
+            duration_output_name is not None
+            and alignment_frames is not None
+            and samples_per_frame is not None
+            and fixed_output_samples is not None
+            and tail_margin_samples is not None
+        ):
+            available_active_samples = max(
+                fixed_output_samples - tail_margin_samples,
+                0,
+            )
+            output_capacity_frames = available_active_samples // samples_per_frame
+            safe_duration_frames = max(
+                min(alignment_frames, output_capacity_frames),
+                1,
+            )
         return OnnxSessionProfile(
             input_names=input_names,
-            output_name=session.get_outputs()[0].name,
+            output_name=output_names[0],
             token_input_name=token_input_name,
             token_input_width=token_input_width,
             token_input_static=token_input_static,
+            duration_output_name=duration_output_name,
+            safe_duration_frames=safe_duration_frames,
         )
 
     def _onnx_profile_for_session(self, session) -> OnnxSessionProfile:
@@ -247,7 +322,7 @@ class FastKokoro:
         trim: bool = True,
         session=None,
     ) -> tuple[np.ndarray, int]:
-        assert 0.5 <= speed <= 2.0, "Speed should be between 0.5 and 2.0"
+        assert 1.0 <= speed <= 2.0, "Speed should be between 1.0 and 2.0"
 
         segments = (
             [TextControlSegment(text=text)]
@@ -297,7 +372,12 @@ class FastKokoro:
         return merged[:merged_length], SAMPLE_RATE
 
     def _trim_audio_part(self, audio_part: np.ndarray) -> np.ndarray:
-        return trim_audio_part(audio_part, use_jit=self.settings.jit)
+        return trim_audio_part(
+            audio_part,
+            use_jit=self.settings.jit,
+            sample_rate=SAMPLE_RATE,
+            padding_ms=self._runtime_part_trim_padding_ms(),
+        )
 
     def _run_onnx_audio(
         self,
@@ -317,20 +397,112 @@ class FastKokoro:
 
         profile = self._onnx_profile_for_session(session)
         inputs = self._build_onnx_inputs(token_ids, voice, speed, profile=profile)
+        output_names = [profile.output_name]
+        if (
+            profile.duration_output_name is not None
+            and profile.safe_duration_frames is not None
+        ):
+            output_names.append(profile.duration_output_name)
         if self.settings.onnx_io_binding:
-            audio = self._run_onnx_audio_iobinding(
+            outputs = self._run_onnx_outputs_iobinding(
                 inputs,
                 session=session,
-                output_name=profile.output_name,
+                output_names=output_names,
             )
         else:
-            audio = session.run(None, inputs)[0]
+            outputs = session.run(output_names, inputs)
+        audio = outputs[0]
+        if len(outputs) > 1 and profile.safe_duration_frames is not None:
+            duration_frames = int(np.asarray(outputs[1]).sum())
+            if duration_frames > profile.safe_duration_frames:
+                recovered = self._recover_duration_overflow(
+                    phonemes,
+                    token_ids,
+                    voice,
+                    speed,
+                    session=session,
+                    duration_frames=duration_frames,
+                    safe_duration_frames=profile.safe_duration_frames,
+                )
+                if recovered is not None:
+                    return recovered
         return trim_audio_tail(
             audio,
             sample_rate=SAMPLE_RATE,
-            trim_ms=self.settings.runtime_tail_trim_ms,
-            fade_ms=self.settings.runtime_tail_fade_ms,
+            trim_ms=self._runtime_tail_trim_ms(),
+            fade_ms=self._runtime_tail_fade_ms(),
         )
+
+    def _recover_duration_overflow(
+        self,
+        phonemes: str,
+        token_ids: list[int],
+        voice: np.ndarray,
+        speed: float,
+        *,
+        session,
+        duration_frames: int,
+        safe_duration_frames: int,
+    ) -> np.ndarray | None:
+        if len(token_ids) <= 1:
+            logger.warning(
+                "ONNX duration overflow cannot be split: duration_frames=%s "
+                "safe_duration_frames=%s tokens=%s",
+                duration_frames,
+                safe_duration_frames,
+                len(token_ids),
+            )
+            return None
+
+        target_tokens = max(1, (len(token_ids) + 1) // 2)
+        batches = self._split_phonemes_to_token_limit(phonemes, target_tokens)
+        if len(batches) <= 1:
+            logger.warning(
+                "ONNX duration overflow split made no progress: duration_frames=%s "
+                "safe_duration_frames=%s tokens=%s",
+                duration_frames,
+                safe_duration_frames,
+                len(token_ids),
+            )
+            return None
+
+        logger.warning(
+            "ONNX duration overflow; retrying %s phoneme batches: "
+            "duration_frames=%s safe_duration_frames=%s tokens=%s",
+            len(batches),
+            duration_frames,
+            safe_duration_frames,
+            len(token_ids),
+        )
+        parts = [
+            self._trim_audio_part(
+                self._run_onnx_audio(
+                    batch,
+                    voice,
+                    speed,
+                    session=session,
+                )
+            )
+            for batch in batches
+        ]
+        return np.concatenate(parts).astype(np.float32, copy=False)
+
+    def _runtime_tail_trim_ms(self) -> int:
+        if self.settings.runtime_tail_trim_ms != DEFAULT_RUNTIME_TAIL_TRIM_MS:
+            return self.settings.runtime_tail_trim_ms
+        if self._token_input_width >= 48:
+            return 220
+        return self.settings.runtime_tail_trim_ms
+
+    def _runtime_tail_fade_ms(self) -> int:
+        if self.settings.runtime_tail_fade_ms != DEFAULT_RUNTIME_TAIL_FADE_MS:
+            return self.settings.runtime_tail_fade_ms
+        if self._token_input_width >= 48:
+            return 96
+        return self.settings.runtime_tail_fade_ms
+
+    def _runtime_part_trim_padding_ms(self) -> int:
+        return self.settings.runtime_part_trim_padding_ms
 
     def _build_onnx_inputs(
         self,
@@ -402,42 +574,68 @@ class FastKokoro:
         max_tokens = profile.token_input_width - 2
         if max_tokens <= 0:
             raise ValueError("Fixed ONNX token input width must leave room for pads")
+        return self._split_phonemes_to_token_limit(phonemes, max_tokens)
+
+    def _split_phonemes_to_token_limit(
+        self,
+        phonemes: str,
+        max_tokens: int,
+    ) -> list[str]:
+        if max_tokens <= 0:
+            raise ValueError("Phoneme token limit must be positive")
         if len(self.kokoro.tokenizer.tokenize(phonemes)) <= max_tokens:
             return [phonemes]
 
         batches: list[str] = []
-        current = ""
-        for piece in phonemes.split():
-            candidate = piece if not current else f"{current} {piece}"
-            if len(self.kokoro.tokenizer.tokenize(candidate)) <= max_tokens:
-                current = candidate
-                continue
-            if current:
-                batches.append(current)
-                current = ""
-            if len(self.kokoro.tokenizer.tokenize(piece)) <= max_tokens:
-                current = piece
-            else:
-                batches.extend(self._split_oversized_token_piece(piece, max_tokens))
-
-        if current:
-            batches.append(current)
+        remaining = phonemes.strip()
+        while len(self.kokoro.tokenizer.tokenize(remaining)) > max_tokens:
+            boundary = self._find_token_split_boundary(remaining, max_tokens)
+            if boundary <= 0 or boundary >= len(remaining):
+                raise RuntimeError("Unable to split phonemes within ONNX token limit")
+            batch = remaining[:boundary].strip()
+            remaining = remaining[boundary:].strip()
+            if not batch or not remaining:
+                raise RuntimeError("Phoneme token split made no progress")
+            batches.append(batch)
+        if remaining:
+            batches.append(remaining)
         return batches
 
-    def _split_oversized_token_piece(self, piece: str, max_tokens: int) -> list[str]:
-        batches: list[str] = []
-        current = ""
-        for char in piece:
-            candidate = current + char
-            if len(self.kokoro.tokenizer.tokenize(candidate)) <= max_tokens:
-                current = candidate
+    def _find_token_split_boundary(self, phonemes: str, max_tokens: int) -> int:
+        candidates: list[tuple[int, str, int]] = []
+        for index, char in enumerate(phonemes):
+            if not (char.isspace() or char in PHONEME_PUNCTUATION):
                 continue
-            if current:
-                batches.append(current)
-            current = char
-        if current:
-            batches.append(current)
-        return batches
+            boundary = index if char.isspace() else index + 1
+            prefix = phonemes[:boundary].strip()
+            if not prefix:
+                continue
+            token_count = len(self.kokoro.tokenizer.tokenize(prefix))
+            if token_count <= max_tokens:
+                candidates.append((boundary, char, token_count))
+
+        minimum_punctuation_tokens = max(1, min(16, max_tokens // 3))
+        for punctuation_group in PHONEME_BREAK_PRIORITY:
+            preferred = [
+                candidate
+                for candidate in candidates
+                if candidate[1] in punctuation_group
+                and candidate[2] >= minimum_punctuation_tokens
+            ]
+            if preferred:
+                return preferred[-1][0]
+
+        whitespace = [candidate for candidate in candidates if candidate[1].isspace()]
+        if whitespace:
+            return whitespace[-1][0]
+
+        safe_boundary = 0
+        for boundary in range(1, len(phonemes)):
+            prefix = phonemes[:boundary]
+            if len(self.kokoro.tokenizer.tokenize(prefix)) > max_tokens:
+                break
+            safe_boundary = boundary
+        return safe_boundary
 
     def _run_onnx_audio_iobinding(
         self,
@@ -448,25 +646,38 @@ class FastKokoro:
     ) -> np.ndarray:
         session = session or self.session
         output_name = output_name or self._onnx_profile_for_session(session).output_name
+        return self._run_onnx_outputs_iobinding(
+            inputs,
+            session=session,
+            output_names=[output_name],
+        )[0]
+
+    def _run_onnx_outputs_iobinding(
+        self,
+        inputs: dict[str, np.ndarray],
+        *,
+        session,
+        output_names: list[str],
+    ) -> list[np.ndarray]:
         device = self._resolve_iobinding_device(session=session)
         if device == "cuda":
             try:
-                return self._run_onnx_audio_cuda_iobinding(
+                return self._run_onnx_outputs_cuda_iobinding(
                     inputs,
                     session=session,
-                    output_name=output_name,
+                    output_names=output_names,
                 )
             except RuntimeError:
                 logger.exception("CUDA IOBinding failed; falling back to CPU IOBinding")
-                return self._run_onnx_audio_cpu_iobinding(
+                return self._run_onnx_outputs_cpu_iobinding(
                     inputs,
                     session=session,
-                    output_name=output_name,
+                    output_names=output_names,
                 )
-        return self._run_onnx_audio_cpu_iobinding(
+        return self._run_onnx_outputs_cpu_iobinding(
             inputs,
             session=session,
-            output_name=output_name,
+            output_names=output_names,
         )
 
     def _resolve_iobinding_device(self, *, session=None) -> str:
@@ -489,12 +700,26 @@ class FastKokoro:
     ) -> np.ndarray:
         session = session or self.session
         output_name = output_name or self._onnx_profile_for_session(session).output_name
+        return self._run_onnx_outputs_cpu_iobinding(
+            inputs,
+            session=session,
+            output_names=[output_name],
+        )[0]
+
+    def _run_onnx_outputs_cpu_iobinding(
+        self,
+        inputs: dict[str, np.ndarray],
+        *,
+        session,
+        output_names: list[str],
+    ) -> list[np.ndarray]:
         binding = session.io_binding()
         for name, value in inputs.items():
             binding.bind_cpu_input(name, value)
-        binding.bind_output(output_name)
+        for output_name in output_names:
+            binding.bind_output(output_name)
         session.run_with_iobinding(binding)
-        return binding.copy_outputs_to_cpu()[0]
+        return binding.copy_outputs_to_cpu()
 
     def _run_onnx_audio_cuda_iobinding(
         self,
@@ -505,14 +730,28 @@ class FastKokoro:
     ) -> np.ndarray:
         session = session or self.session
         output_name = output_name or self._onnx_profile_for_session(session).output_name
+        return self._run_onnx_outputs_cuda_iobinding(
+            inputs,
+            session=session,
+            output_names=[output_name],
+        )[0]
+
+    def _run_onnx_outputs_cuda_iobinding(
+        self,
+        inputs: dict[str, np.ndarray],
+        *,
+        session,
+        output_names: list[str],
+    ) -> list[np.ndarray]:
         runtime = _require_ort()
         binding = session.io_binding()
         for name, value in inputs.items():
             ortvalue = runtime.OrtValue.ortvalue_from_numpy(value, "cuda", 0)
             binding.bind_ortvalue_input(name, ortvalue)
-        binding.bind_output(output_name, device_type="cpu")
+        for output_name in output_names:
+            binding.bind_output(output_name, device_type="cpu")
         session.run_with_iobinding(binding)
-        return binding.copy_outputs_to_cpu()[0]
+        return binding.copy_outputs_to_cpu()
 
     def _get_onnx_input_buffers(self) -> OnnxInputBuffers:
         buffers = getattr(self._onnx_input_buffers, "buffers", None)
@@ -603,7 +842,8 @@ class FastKokoro:
             return
 
         used_ttfc_session = False
-        for segment in self._stream_text_control_segments(text):
+        stream_segments = self._stream_text_control_segments(text, lang=resolved_lang)
+        for index, segment in enumerate(stream_segments):
             if segment.pause_seconds is None:
                 ttfc_session = self.ttfc_session if not used_ttfc_session else None
                 if ttfc_session is not None:
@@ -645,38 +885,102 @@ class FastKokoro:
                 self.settings.stream_audio_frame_ms,
             ):
                 yield frame
+            if self._should_insert_stream_boundary_silence(stream_segments, index):
+                boundary_audio = encode_audio(
+                    silence_samples(self.settings.stream_boundary_silence_ms / 1000.0),
+                    SAMPLE_RATE,
+                    response_format,
+                    use_pcm_jit=self.settings.jit,
+                )
+                for frame in split_pcm_frames(
+                    boundary_audio,
+                    self.settings.stream_audio_frame_ms,
+                ):
+                    yield frame
+
+    def _should_insert_stream_boundary_silence(
+        self,
+        segments: list[TextControlSegment],
+        index: int,
+    ) -> bool:
+        if self.settings.stream_boundary_silence_ms <= 0:
+            return False
+        if index >= len(segments) - 1:
+            return False
+        return (
+            segments[index].pause_seconds is None
+            and segments[index + 1].pause_seconds is None
+        )
 
     def _stream_schedule_limits(self) -> tuple[int, int]:
         providers = set(self.session.get_providers())
         if {"CUDAExecutionProvider", "TensorrtExecutionProvider"} & providers:
-            return (
+            return self._cap_stream_limits_for_bucket(
                 self.settings.stream_schedule_max_segment_chars,
                 self.settings.stream_schedule_max_segment_words,
             )
-        return (
+        return self._cap_stream_limits_for_bucket(
             self.settings.stream_cpu_schedule_max_segment_chars,
             self.settings.stream_cpu_schedule_max_segment_words,
         )
 
+    def _cap_stream_limits_for_bucket(
+        self,
+        max_chars: int,
+        max_words: int,
+    ) -> tuple[int, int]:
+        capacity = self._stream_bucket_word_capacity()
+        if capacity is None:
+            return max_chars, max_words
+        capped_words = min(max_words, capacity)
+        capped_chars = min(
+            max_chars,
+            max(SCHEDULER_MIN_SEGMENT_CHARS, capped_words * 16),
+        )
+        return capped_chars, capped_words
+
+    def _stream_bucket_word_capacity(self) -> int | None:
+        if not self._onnx_profile.token_input_static:
+            return None
+        if self._token_input_width in STATIC_BUCKET_WORD_CAPACITY:
+            return STATIC_BUCKET_WORD_CAPACITY[self._token_input_width]
+        usable_tokens = max(1, self._token_input_width - 2)
+        return max(1, int(usable_tokens / 7.5))
+
     def _stream_initial_schedule_limits(
         self, max_chars: int, max_words: int
     ) -> tuple[int, int]:
-        if (
-            self.settings.stream_max_segment_chars != DEFAULT_STREAM_MAX_SEGMENT_CHARS
-            or self.settings.stream_max_segment_words
-            != DEFAULT_STREAM_MAX_SEGMENT_WORDS
-        ):
-            return (
-                min(self.settings.stream_max_segment_chars, max_chars),
-                min(self.settings.stream_max_segment_words, max_words),
+        configured_chars = self.settings.stream_max_segment_chars
+        configured_words = self.settings.stream_max_segment_words
+        if configured_chars is not None or configured_words is not None:
+            auto_chars, auto_words = self._auto_stream_initial_schedule_limits(
+                max_chars,
+                max_words,
+            )
+            return self._cap_stream_limits_for_bucket(
+                min(configured_chars or auto_chars, max_chars),
+                min(configured_words or auto_words, max_words),
             )
 
+        return self._auto_stream_initial_schedule_limits(max_chars, max_words)
+
+    def _auto_stream_initial_schedule_limits(
+        self, max_chars: int, max_words: int
+    ) -> tuple[int, int]:
         usable_tokens = max(1, self._token_input_width - 2)
         initial_words = max(1, int(usable_tokens / 7.5))
-        initial_chars = max(DEFAULT_STREAM_MAX_SEGMENT_CHARS, initial_words * 12)
-        return min(initial_chars, max_chars), min(initial_words, max_words)
+        initial_chars = max(SCHEDULER_MIN_SEGMENT_CHARS, initial_words * 12)
+        return self._cap_stream_limits_for_bucket(
+            min(initial_chars, max_chars),
+            min(initial_words, max_words),
+        )
 
-    def _stream_text_control_segments(self, text: str) -> list[TextControlSegment]:
+    def _stream_text_control_segments(
+        self,
+        text: str,
+        *,
+        lang: str,
+    ) -> list[TextControlSegment]:
         segments: list[TextControlSegment] = []
         for segment in split_text_control_segments(text):
             if segment.pause_seconds is not None:
@@ -731,9 +1035,112 @@ class FastKokoro:
                         )
             else:
                 text_segments = split_sentences(segment.text)
+                text_segments = self._split_text_segments_for_stream_bucket_capacity(
+                    text_segments
+                )
 
-            segments.extend(TextControlSegment(text=item) for item in text_segments)
+            for item in self._split_text_segments_for_onnx_token_width(
+                text_segments,
+                lang=lang,
+            ):
+                segments.append(TextControlSegment(text=item))
         return segments
+
+    def _split_text_segments_for_stream_bucket_capacity(
+        self,
+        text_segments: list[str],
+    ) -> list[str]:
+        capacity = self._stream_bucket_word_capacity()
+        if capacity is None:
+            return text_segments
+
+        max_chars = max(SCHEDULER_MIN_SEGMENT_CHARS, capacity * 16)
+        output: list[str] = []
+        for text in text_segments:
+            output.extend(
+                split_scheduled_chunks(
+                    text,
+                    initial_max_chars=max_chars,
+                    initial_max_words=capacity,
+                    max_chars=max_chars,
+                    max_words=capacity,
+                )
+            )
+        return output
+
+    def _split_text_segments_for_onnx_token_width(
+        self,
+        text_segments: list[str],
+        *,
+        lang: str,
+    ) -> list[str]:
+        profile = self._onnx_profile
+        if not profile.token_input_static:
+            return text_segments
+
+        max_tokens = profile.token_input_width - 2
+        if max_tokens <= 0:
+            raise ValueError("Fixed ONNX token input width must leave room for pads")
+
+        output: list[str] = []
+        for text in text_segments:
+            output.extend(self._split_text_for_onnx_token_width(text, lang, max_tokens))
+        return output
+
+    def _split_text_for_onnx_token_width(
+        self,
+        text: str,
+        lang: str,
+        max_tokens: int,
+    ) -> list[str]:
+        if self._text_token_count(text, lang) <= max_tokens:
+            return [text]
+
+        batches: list[str] = []
+        current = ""
+        for word in text.split():
+            candidate = word if not current else f"{current} {word}"
+            if self._text_token_count(candidate, lang) <= max_tokens:
+                current = candidate
+                continue
+
+            if current:
+                batches.append(current)
+                current = ""
+
+            if self._text_token_count(word, lang) <= max_tokens:
+                current = word
+                continue
+
+            batches.extend(self._split_oversized_text_piece(word, lang, max_tokens))
+
+        if current:
+            batches.append(current)
+        return batches
+
+    def _split_oversized_text_piece(
+        self,
+        text: str,
+        lang: str,
+        max_tokens: int,
+    ) -> list[str]:
+        batches: list[str] = []
+        current = ""
+        for char in text:
+            candidate = current + char
+            if self._text_token_count(candidate, lang) <= max_tokens:
+                current = candidate
+                continue
+            if current:
+                batches.append(current)
+            current = char
+        if current:
+            batches.append(current)
+        return batches
+
+    def _text_token_count(self, text: str, lang: str) -> int:
+        phonemes = self._phonemize_cached(text, lang)
+        return len(self.kokoro.tokenizer.tokenize(phonemes))
 
 
 def silence_samples(seconds: float) -> np.ndarray:

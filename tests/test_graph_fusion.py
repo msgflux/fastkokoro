@@ -1,9 +1,15 @@
 from pathlib import Path
 
+import numpy as np
+import onnx
 import pytest
+from onnx import TensorProto, helper
 
 from fastkokoro.config import Settings
-from fastkokoro.graph_fusion import resolve_adain_fused_model_path
+from fastkokoro.graph_fusion import (
+    _make_portable_atan2_nodes,
+    resolve_adain_fused_model_path,
+)
 
 
 def _settings(**overrides):
@@ -44,6 +50,7 @@ def _settings(**overrides):
         warmup_request=False,
         runtime_tail_trim_ms=150,
         runtime_tail_fade_ms=72,
+        runtime_part_trim_padding_ms=80,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,
@@ -52,6 +59,7 @@ def _settings(**overrides):
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=200,
+        stream_boundary_silence_ms=0,
         stream_max_segment_chars=80,
         stream_max_segment_words=12,
         stream_schedule_max_segment_chars=96,
@@ -98,3 +106,44 @@ def test_resolve_adain_fused_model_path_uses_explicit_model(tmp_path):
         )
         == adain_model
     )
+
+
+def test_portable_atan2_polynomial_matches_numpy(tmp_path):
+    runtime = pytest.importorskip("onnxruntime")
+    shape = [2, 7]
+    graph = helper.make_graph(
+        _make_portable_atan2_nodes("Atan2Poly", "imag", "real", "phase"),
+        "atan2_poly",
+        [
+            helper.make_tensor_value_info("imag", TensorProto.FLOAT16, shape),
+            helper.make_tensor_value_info("real", TensorProto.FLOAT16, shape),
+        ],
+        [helper.make_tensor_value_info("phase", TensorProto.FLOAT16, shape)],
+    )
+    model = helper.make_model(
+        graph,
+        opset_imports=[helper.make_opsetid("", 17)],
+        ir_version=8,
+    )
+    model_path = tmp_path / "atan2-poly.onnx"
+    onnx.save(model, model_path)
+
+    imag = np.array(
+        [[0.0, 1.0, -1.0, 1.0, -1.0, 0.25, -4.0]] * 2,
+        dtype=np.float16,
+    )
+    real = np.array(
+        [[0.0, 1.0, 1.0, -1.0, -1.0, -2.0, 0.125]] * 2,
+        dtype=np.float16,
+    )
+    session = runtime.InferenceSession(
+        str(model_path),
+        providers=["CPUExecutionProvider"],
+    )
+
+    actual = session.run(None, {"imag": imag, "real": real})[0]
+    expected = np.arctan2(imag.astype(np.float32), real.astype(np.float32)).astype(
+        np.float16
+    )
+
+    np.testing.assert_allclose(actual, expected, atol=0.002, rtol=0.0)

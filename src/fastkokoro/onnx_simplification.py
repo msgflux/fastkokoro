@@ -33,8 +33,13 @@ def resolve_cpu_simplified_model_path(
 
     cache_path = _simplified_cache_path(model_path, settings)
     if cache_path.exists():
-        logger.info("Using cached ONNX-simplified CPU model: %s", cache_path)
-        return cache_path
+        if _is_loadable_onnx_model(cache_path):
+            logger.info("Using cached ONNX-simplified CPU model: %s", cache_path)
+            return cache_path
+        logger.warning(
+            "Ignoring invalid ONNX-simplified CPU cache: %s",
+            cache_path,
+        )
 
     try:
         simplified_path = simplify_onnx_model(model_path, cache_path)
@@ -62,6 +67,14 @@ def simplify_onnx_model(model_path: Path, output_path: Path) -> Path:
     onnx.save(model, output_path)
     logger.info("ONNX-simplified CPU model written: %s", output_path)
     return output_path
+
+
+def _is_loadable_onnx_model(model_path: Path) -> bool:
+    try:
+        model = onnx.load(model_path, load_external_data=False)
+    except Exception:
+        return False
+    return bool(model.graph.node and model.graph.output)
 
 
 def _should_simplify_for_cpu(providers: list[str]) -> bool:

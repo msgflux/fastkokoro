@@ -76,6 +76,7 @@ def settings(**overrides):
         warmup_request=False,
         runtime_tail_trim_ms=150,
         runtime_tail_fade_ms=72,
+        runtime_part_trim_padding_ms=80,
         profile=False,
         profile_dir=Path("/tmp/cache/profiles"),
         profile_warmup=False,
@@ -84,6 +85,7 @@ def settings(**overrides):
         stream_adaptive_max_chars=50,
         stream_adaptive_cpu_max_chars=12,
         stream_audio_frame_ms=200,
+        stream_boundary_silence_ms=0,
         stream_max_segment_chars=80,
         stream_max_segment_words=12,
         stream_schedule_max_segment_chars=96,
@@ -216,6 +218,22 @@ def test_speech_defaults_to_pcm_response_format():
     assert metrics["speech"]["requests"] == 1
     assert metrics["speech"]["bytes"] == len(b"audio")
     assert metrics["speech"]["latency_seconds_last"] >= 0
+
+
+def test_speech_rejects_speed_below_supported_range():
+    client = TestClient(create_app(FakeEngine()))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={
+            "model": "kokoro",
+            "input": "hello",
+            "voice": "af_heart",
+            "speed": 0.5,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_speech_accepts_portuguese_alias():
