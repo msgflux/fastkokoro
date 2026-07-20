@@ -109,13 +109,6 @@ Published tags:
 | `gpu-cuda11.8-cudnn8`, `latest-gpu-cuda11.8-cudnn8` | Latest CUDA 11.8/cuDNN8 GPU image |
 | `tensorrt`, `latest-tensorrt` | Alias for the latest TensorRT image |
 | `tensorrt-25.06`, `latest-tensorrt-25.06` | TensorRT 25.06 image with ONNX Runtime 1.22 |
-| `0.3.0-cpu`, `0.3-cpu` | Versioned CPU image |
-| `0.3.0-gpu`, `0.3-gpu` | Versioned CUDA 12.6/cuDNN9 GPU image alias |
-| `0.3.0-gpu-cuda12.6-cudnn9`, `0.3-gpu-cuda12.6-cudnn9` | Versioned CUDA 12.6/cuDNN9 GPU image |
-| `0.3.0-gpu-legacy`, `0.3-gpu-legacy` | Versioned CUDA 11.8/cuDNN8 GPU image alias |
-| `0.3.0-gpu-cuda11.8-cudnn8`, `0.3-gpu-cuda11.8-cudnn8` | Versioned CUDA 11.8/cuDNN8 GPU image |
-| `0.3.0-tensorrt`, `0.3-tensorrt` | Versioned TensorRT image alias |
-| `0.3.0-tensorrt-25.06`, `0.3-tensorrt-25.06` | Versioned TensorRT 25.06 image |
 
 Build and run the CPU image locally:
 
