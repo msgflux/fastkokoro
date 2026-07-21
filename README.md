@@ -98,6 +98,100 @@ TensorRT engine caching:
 docker run --gpus all -p 8880:8880 -v fastkokoro-models:/models msgflux/fastkokoro:tensorrt
 ```
 
+## API
+
+Generate speech:
+
+```bash
+curl http://localhost:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "kokoro",
+    "input": "Hello from fastkokoro.",
+    "voice": "af_heart",
+    "lang": "en-us",
+    "response_format": "wav"
+  }' \
+  --output speech.wav
+```
+
+Stream raw PCM audio:
+
+```bash
+curl http://localhost:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "kokoro",
+    "input": "Streaming from fastkokoro.",
+    "voice": "af_heart",
+    "lang": "en-us",
+    "response_format": "pcm",
+    "stream": true
+  }' \
+  --output speech.pcm
+```
+
+Service endpoints:
+
+```bash
+curl http://localhost:8880/health
+curl http://localhost:8880/v1/models
+curl http://localhost:8880/metrics
+```
+
+The metrics endpoint reports request latency, speech latency, streaming chunks,
+total bytes, time to first speech chunk, and active ONNX Runtime providers.
+
+The server exposes the local model as `kokoro`. For client compatibility,
+`/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases.
+
+## OpenAI SDK
+
+Point the OpenAI Python SDK at the local server:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8880/v1",
+    api_key="fastkokoro",
+)
+
+with client.audio.speech.with_streaming_response.create(
+    model="kokoro",
+    voice="af_heart",
+    input="Hello from fastkokoro.",
+    response_format="wav",
+) as response:
+    response.stream_to_file("speech.wav")
+```
+
+The repository also includes directly runnable examples with inline
+dependencies:
+
+```bash
+uv run examples/tts_save_file.py
+uv run examples/tts_stream_chunks.py
+```
+
+They accept `FASTKOKORO_BASE_URL`, `FASTKOKORO_API_KEY`,
+`FASTKOKORO_VOICE`, `FASTKOKORO_TEXT`, and `FASTKOKORO_TTS_OUTPUT`.
+
+## Python API
+
+```python
+from fastkokoro import FastKokoro
+
+engine = FastKokoro()
+audio = engine.create(
+    "Hello from fastkokoro.",
+    voice="af_heart",
+    response_format="wav",
+)
+```
+
+## Docker Details
+
 Published tags:
 
 | Tag | Description |
@@ -148,6 +242,10 @@ The CUDA 11.8 legacy image is kept for older hosts, but TensorRT EP support is
 published only through the TensorRT 25.06 image. Current Python 3.11 ONNX
 Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
 
+## Advanced Configuration
+
+### Performance
+
 Final checkpoint measurements on a GTX 1650 (SM75) with CUDA I/O Binding:
 
 | Bucket | ORT | Provider | p50 | p90 | First engine build |
@@ -160,7 +258,7 @@ checkpoint compiled into one TensorRT engine with no CUDA or CPU node fallback.
 Persist `/models/trt-cache` because engines are specific to the model, bucket,
 runtime, and GPU architecture.
 
-Environment variables:
+### Environment Variables
 
 | Variable | Default |
 | --- | --- |
@@ -218,9 +316,9 @@ request latency on the first user request.
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
 the same streaming speech endpoint flow and consume the first chunk.
 
-The b96 checkpoint is the only supported release checkpoint. Other bucket sizes
-did not pass the multilingual listening tests for vocoder tail quality. Long
-inputs are split automatically using the loaded model's token and duration
+### Model Geometry and Export
+
+Long inputs are split automatically using the loaded model's token and duration
 limits.
 
 ```bash
@@ -312,9 +410,9 @@ uv run --with onnxsim==0.6.5 --with onnx==1.21.0 --with numpy==1.26.4 \
     --atan2 portable
 ```
 
-The published graphs use opset 17, standard ALBERT attention subgraphs, and a
-portable FP32 polynomial replacement for the vocoder's `atan2`. They require no
-external custom-op library and load in ONNX Runtime 1.16.3, 1.17.3, and 1.18.1.
+The published graph uses opset 17, standard ALBERT attention subgraphs, and a
+portable FP32 polynomial replacement for the vocoder's `atan2`. It requires no
+external custom-op library and loads in ONNX Runtime 1.16.3, 1.17.3, and 1.18.1.
 An experimental fusion to `com.microsoft.Attention` was discarded: it improved
 CUDA latency by only 2-3%, while TensorRT 10.11 rejected the 12 fused nodes and
 fragmented execution across providers on SM75. The release optimizer therefore
@@ -325,6 +423,8 @@ Published artifact checksums:
 | File | Nodes | SHA-256 |
 | --- | ---: | --- |
 | `onnx/kokoro-82m-streaming-b96-fp16.onnx` | 1,696 | `7a77a144601a7a37cee060cd26cdab3c6125f61cbcf87ddd0fc0f929c9d67ad8` |
+
+### Runtime Behavior
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
@@ -448,41 +548,6 @@ For latency tuning, run:
 uv run python scripts/benchmark_latency.py --text short --iterations 5 --warmup
 ```
 
-## API
-
-Health:
-
-```bash
-curl http://localhost:8880/health
-```
-
-Models:
-
-```bash
-curl http://localhost:8880/v1/models
-```
-
-Metrics:
-
-```bash
-curl http://localhost:8880/metrics
-```
-
-The metrics endpoint returns JSON counters and latency summaries for HTTP
-requests and speech generation, including streaming chunk counts, total bytes,
-time to first speech chunk, and active ONNX Runtime providers. For streaming
-speech responses, use the `speech` latency fields; HTTP middleware latency only
-tracks response setup.
-
-Run benchmarks with `FASTKOKORO_WARMUP=true`, which is the default. Compare
-requests after startup so model/session initialization does not pollute latency
-measurements.
-
-The server exposes the local Kokoro model as `kokoro`. For client compatibility,
-`/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases, but
-they are not listed by `/v1/models` because the server is not running OpenAI TTS
-models.
-
 ## Voices and Languages
 
 The official Kokoro voice list maps voices to language codes. `fastkokoro`
@@ -500,78 +565,3 @@ the requested voice belongs to the resolved language.
 | Hindi | `h`, `hi`, `hi-in` | `hf_alpha`, `hf_beta`, `hm_omega`, `hm_psi` |
 | Italian | `i`, `it`, `it-it` | `if_sara`, `im_nicola` |
 | Brazilian Portuguese | `p`, `pt`, `pt-br` | `pf_dora`, `pm_alex`, `pm_santa` |
-
-Speech:
-
-```bash
-curl http://localhost:8880/v1/audio/speech \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "kokoro",
-    "input": "Hello from fastkokoro.",
-    "voice": "af_heart",
-    "response_format": "wav"
-  }' \
-  --output speech.wav
-```
-
-Streaming PCM:
-
-```bash
-curl http://localhost:8880/v1/audio/speech \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "kokoro",
-    "input": "Streaming from fastkokoro.",
-    "voice": "af_heart",
-    "response_format": "pcm",
-    "stream": true
-  }' \
-  --output speech.pcm
-```
-
-## OpenAI SDK Examples
-
-The examples use inline script dependencies, so they can run directly with `uv`
-without adding the OpenAI SDK to the project environment.
-
-Start `fastkokoro` first:
-
-```bash
-uv run fastkokoro
-```
-
-Save synthesized audio to a file:
-
-```bash
-uv run examples/tts_save_file.py
-```
-
-Consume streamed audio chunks:
-
-```bash
-uv run examples/tts_stream_chunks.py
-```
-
-Useful environment variables:
-
-| Variable | Default |
-| --- | --- |
-| `FASTKOKORO_BASE_URL` | `http://localhost:8880/v1` |
-| `FASTKOKORO_API_KEY` | `fastkokoro` |
-| `FASTKOKORO_VOICE` | `pf_dora` |
-| `FASTKOKORO_TEXT` | `Ola, tudo bem?` |
-| `FASTKOKORO_TTS_OUTPUT` | `speech.wav` |
-
-## Python
-
-```python
-from fastkokoro import FastKokoro
-
-engine = FastKokoro()
-audio = engine.create(
-    "Hello from fastkokoro.",
-    voice="af_heart",
-    response_format="wav",
-)
-```
