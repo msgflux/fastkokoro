@@ -684,10 +684,11 @@ async def test_stream_first_audio_segment_uses_ttfc_session():
 
 def test_build_onnx_inputs_keeps_dynamic_model_at_real_token_length():
     engine = _engine(_settings())
+    voice = np.arange(512 * 256, dtype=np.float32).reshape(512, 256)
 
     inputs = engine._build_onnx_inputs(
         [10, 20, 30],
-        engine._voice_styles["af_heart"],
+        voice,
         1.0,
     )
 
@@ -697,6 +698,7 @@ def test_build_onnx_inputs_keeps_dynamic_model_at_real_token_length():
         inputs["tokens"],
         np.array([[0, 10, 20, 30, 0]], dtype=np.int64),
     )
+    np.testing.assert_array_equal(inputs["style"], voice[2])
 
 
 def test_build_onnx_inputs_pads_fixed_attention_mask_model():
@@ -973,6 +975,25 @@ def test_duration_overflow_retries_smaller_phoneme_batches(monkeypatch):
     np.testing.assert_array_equal(
         audio,
         np.full(6, 4.0, dtype=np.float32),
+    )
+
+
+def test_duration_recovery_token_limit_scales_with_overflow():
+    assert (
+        FastKokoro._duration_recovery_token_limit(
+            79,
+            duration_frames=208,
+            safe_duration_frames=200,
+        )
+        == 75
+    )
+    assert (
+        FastKokoro._duration_recovery_token_limit(
+            9,
+            duration_frames=259,
+            safe_duration_frames=258,
+        )
+        == 8
     )
 
 

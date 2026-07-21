@@ -246,12 +246,13 @@ Runtime GPU wheels expect TensorRT 10 libraries for TensorRT EP.
 
 ### Performance
 
-Final checkpoint measurements on a GTX 1650 (SM75) with CUDA I/O Binding:
+Final checkpoint model-call measurements on a GTX 1650 (SM75), after five
+warmups and across 25 iterations:
 
 | Bucket | ORT | Provider | p50 | p90 | First engine build |
 | ---: | ---: | --- | ---: | ---: | ---: |
-| 96 | 1.18.1 | CUDA | 169.04 ms | 169.83 ms | - |
-| 96 | 1.22.0 | TensorRT 10.11 | 118.16 ms | 132.63 ms | 206.96 s |
+| 96 | 1.22.0 | CUDA | 481.91 ms | 485.03 ms | - |
+| 96 | 1.22.0 | TensorRT 10.11 | 100.93 ms | 101.33 ms | ~3.5 min |
 
 The TensorRT measurement is a cache-hit model call after five warmups. The b96
 checkpoint compiled into one TensorRT engine with no CUDA or CPU node fallback.
@@ -337,7 +338,7 @@ before late words land at the tail of a near-full fixed-output window.
 
 | Bucket | Usable tokens | Alignment frames | Output samples | Expected words | TensorRT p50 | Notes |
 | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 96 | 94 | 200 | 104,400 | 14 | 118 ms | Adaptive margin 4,320/8,400 |
+| 96 | 94 | 200 | 108,000 | 14 | 101 ms | Adaptive margin 4,800/8,400/12,000 |
 
 The server splits fixed-width ONNX requests by phonemized token count before
 running inference, so a text segment is not sent to a checkpoint with more valid
@@ -345,11 +346,12 @@ tokens than its input width supports. Corrected exports also publish their
 alignment and tail geometry as ONNX metadata. When predicted duration exceeds
 the safe alignment capacity, the server retries smaller phoneme batches instead
 of returning a truncated waveform. The b96 graph masks waveform output with a
-4,320-sample margin for inputs up to 32 valid tokens and an 8,400-sample margin
-above that threshold. This avoids short-utterance vocoder noise while preserving
-longer endings. The exporter implements each margin by shifting the fixed
-mask-position vector into negative indices, not by adding the margin to the
-predicted active-sample count. Set
+4,800-sample margin when `input_lengths <= 32`, an 8,400-sample margin when
+`input_lengths <= 64`, and a 12,000-sample margin for longer inputs. The length
+includes the start and end pad positions. This avoids short-utterance vocoder
+noise while preserving longer endings. The exporter implements each margin by
+shifting the fixed mask-position vector into negative indices, not by adding
+the margin to the predicted active-sample count. Set
 `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` and `FASTKOKORO_RUNTIME_TAIL_FADE_MS` only if
 you need to override the default final cleanup.
 
@@ -358,12 +360,12 @@ Direct PyTorch measurement shows that Kokoro's decoder tensor contains exactly
 speech boundary is better modeled by 480 samples per predicted-duration frame;
 keeping all 600 preserves stochastic vocoder output that is heard as tail noise.
 The b96 recipe below uses the listening-tested 480 scale and selects the shifted
-4,320/8,400-sample margin inside the ONNX graph from `input_lengths`.
+4,800/8,400/12,000-sample margin inside the ONNX graph from `input_lengths`.
 
 ```bash
 B=96
 ALIGN=$((2 * B + 8))
-TAIL_MARGIN=8400
+TAIL_MARGIN=12000
 SAMPLES=$((ALIGN * 480 + TAIL_MARGIN))
 SNAPSHOT="$HOME/.cache/huggingface/hub/models--hexgrad--Kokoro-82M/snapshots/f3ff3571791e39611d31c381e3a41a3af07b4987"
 
@@ -379,19 +381,22 @@ uv run \
     --kokoro-repo demo-output/reexport/hexgrad-kokoro \
     --config "$SNAPSHOT/config.json" \
     --checkpoint "$SNAPSHOT/kokoro-v1_0.pth" \
-    --output "demo-output/reexport/candidates/kokoro-82m-streaming-b96-align200-decoder-fp16-frame480-margin8400-short4320t32-foldrecip.onnx" \
+    --output "demo-output/reexport/candidates/kokoro-b96-lengthaware-duration-only.onnx" \
     --bucket "$B" \
     --fixed-alignment-frames "$ALIGN" \
     --fixed-output-samples "$SAMPLES" \
     --output-samples-per-frame 480 \
     --output-tail-margin-samples "$TAIL_MARGIN" \
-    --output-short-tail-margin-samples 4320 \
+    --output-short-tail-margin-samples 4800 \
     --output-short-tail-margin-max-tokens 32 \
+    --output-medium-tail-margin-samples 8400 \
+    --output-medium-tail-margin-max-tokens 64 \
     --precision decoder-fp16 \
     --opset 17 \
     --legacy-export \
     --length-aware \
     --patch-fixed-lstm \
+    --patch-fixed-lstm-scope duration \
     --patch-scatterless-sine-source \
     --patch-split-adain \
     --patch-albert-sdpa-bool-mask-scale \
@@ -413,6 +418,10 @@ uv run --with onnxsim==0.6.5 --with onnx==1.21.0 --with numpy==1.26.4 \
 The published graph uses opset 17, standard ALBERT attention subgraphs, and a
 portable FP32 polynomial replacement for the vocoder's `atan2`. It requires no
 external custom-op library and loads in ONNX Runtime 1.16.3, 1.17.3, and 1.18.1.
+Only the duration-prediction LSTMs use real sequence lengths. Listening tests
+found that retaining fixed-width context in the acoustic text encoder and
+shared F0/noise LSTM avoids harsh output in some voices while preserving the
+duration fix for very short British English.
 An experimental fusion to `com.microsoft.Attention` was discarded: it improved
 CUDA latency by only 2-3%, while TensorRT 10.11 rejected the 12 fused nodes and
 fragmented execution across providers on SM75. The release optimizer therefore
@@ -422,7 +431,7 @@ Published artifact checksums:
 
 | File | Nodes | SHA-256 |
 | --- | ---: | --- |
-| `onnx/kokoro-82m-streaming-b96-fp16.onnx` | 1,696 | `7a77a144601a7a37cee060cd26cdab3c6125f61cbcf87ddd0fc0f929c9d67ad8` |
+| `onnx/kokoro-82m-streaming-b96-fp16.onnx` | 1,750 | `7ca511a0821589124870723dc90672624b587910c1ed44659cc1c7b6e29131aa` |
 
 ### Runtime Behavior
 

@@ -17,7 +17,10 @@ sys.path.insert(0, str(ROOT))
 from fastkokoro.assets import resolve_voices_path  # noqa: E402
 from fastkokoro.config import Settings  # noqa: E402
 from fastkokoro.kokoro import Tokenizer  # noqa: E402
-from scripts.export_kokoro_torch_ttfc import patch_fixed_lstm_for_export  # noqa: E402
+from scripts.export_kokoro_torch_ttfc import (  # noqa: E402
+    FixedLengthAwareBiLSTM,
+    patch_fixed_lstm_for_export,
+)
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,11 @@ class TimedKokoro(torch.nn.Module):
                 text_mask,
             ),
         )
-        x = self._time(timings, "duration_lstm", lambda: self._duration_lstm(d))
+        x = self._time(
+            timings,
+            "duration_lstm",
+            lambda: self._duration_lstm(d, input_lengths),
+        )
         duration = self._time(
             timings,
             "duration_projection",
@@ -227,9 +234,17 @@ class TimedKokoro(torch.nn.Module):
             lambda: generator.stft.inverse(spec, phase),
         )
 
-    def _duration_lstm(self, d: torch.Tensor) -> torch.Tensor:
-        self.kmodel.predictor.lstm.flatten_parameters()
-        x, _ = self.kmodel.predictor.lstm(d)
+    def _duration_lstm(
+        self,
+        d: torch.Tensor,
+        input_lengths: torch.LongTensor,
+    ) -> torch.Tensor:
+        lstm = self.kmodel.predictor.lstm
+        if isinstance(lstm, FixedLengthAwareBiLSTM):
+            x, _ = lstm(d, input_lengths)
+            return x
+        lstm.flatten_parameters()
+        x, _ = lstm(d)
         return x
 
     def _build_alignment(
@@ -374,7 +389,8 @@ def build_inputs(
         dtype=torch.long,
         device=device,
     )
-    style = voices[args.voice][min(len(tokens), voices[args.voice].shape[0] - 1)]
+    style_index = min(max(len(tokens) - 1, 0), voices[args.voice].shape[0] - 1)
+    style = voices[args.voice][style_index]
     ref_s = torch.tensor(style.reshape(1, 256), dtype=torch.float32, device=device)
     speed = torch.ones(1, dtype=torch.float32, device=device)
     input_lengths = torch.tensor([len(tokens) + 2], dtype=torch.long, device=device)
