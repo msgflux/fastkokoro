@@ -8,10 +8,55 @@ from onnx import TensorProto, helper, numpy_helper
 torch = pytest.importorskip("torch")
 
 from scripts.export_kokoro_torch_ttfc import (  # noqa: E402
+    FixedLengthAwareBiLSTM,
     KokoroTTFCExportWrapper,
     fold_constant_reciprocals,
     validate_output_geometry,
 )
+
+
+def test_fixed_length_aware_bilstm_matches_packed_sequence():
+    torch.manual_seed(7)
+    source = torch.nn.LSTM(
+        input_size=5,
+        hidden_size=4,
+        batch_first=True,
+        bidirectional=True,
+    ).eval()
+    inputs = torch.randn(2, 12, 5)
+    lengths = torch.tensor([7, 3], dtype=torch.long)
+    packed = torch.nn.utils.rnn.pack_padded_sequence(
+        inputs,
+        lengths,
+        batch_first=True,
+        enforce_sorted=False,
+    )
+    packed_output, _ = source(packed)
+    expected, _ = torch.nn.utils.rnn.pad_packed_sequence(
+        packed_output,
+        batch_first=True,
+        total_length=inputs.shape[1],
+    )
+
+    actual, _ = FixedLengthAwareBiLSTM(source)(inputs, lengths)
+
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+
+
+def test_fixed_length_aware_bilstm_clamps_lengths_to_fixed_width():
+    torch.manual_seed(11)
+    source = torch.nn.LSTM(
+        input_size=3,
+        hidden_size=2,
+        batch_first=True,
+        bidirectional=True,
+    ).eval()
+    inputs = torch.randn(1, 6, 3)
+    expected, _ = source(inputs)
+
+    actual, _ = FixedLengthAwareBiLSTM(source)(inputs, torch.tensor([9]))
+
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
 
 
 def test_mask_waveform_to_duration_zeros_after_active_samples_with_fade():
@@ -76,6 +121,38 @@ def test_mask_waveform_to_duration_uses_short_margin_by_input_length():
     assert torch.all(short[8:] == 0.0)
     assert torch.all(long[:12] == 1.0)
     assert torch.all(long[12:] == 0.0)
+
+
+def test_mask_waveform_to_duration_uses_three_margin_tiers():
+    wrapper = KokoroTTFCExportWrapper(
+        torch.nn.Identity(),
+        fixed_output_samples=30,
+        output_samples_per_frame=2,
+        output_tail_margin_samples=8,
+        output_short_tail_margin_samples=2,
+        output_short_tail_margin_max_tokens=4,
+        output_medium_tail_margin_samples=5,
+        output_medium_tail_margin_max_tokens=7,
+    )
+    waveform = torch.ones(30)
+    duration = torch.tensor([2, 1])
+
+    short = wrapper.mask_waveform_to_duration(
+        waveform, duration, input_lengths=torch.tensor([4])
+    )
+    medium = wrapper.mask_waveform_to_duration(
+        waveform, duration, input_lengths=torch.tensor([7])
+    )
+    long = wrapper.mask_waveform_to_duration(
+        waveform, duration, input_lengths=torch.tensor([8])
+    )
+
+    assert torch.all(short[:8] == 1.0)
+    assert torch.all(short[8:] == 0.0)
+    assert torch.all(medium[:11] == 1.0)
+    assert torch.all(medium[11:] == 0.0)
+    assert torch.all(long[:14] == 1.0)
+    assert torch.all(long[14:] == 0.0)
 
 
 def test_finalize_waveform_only_pads_missing_samples():

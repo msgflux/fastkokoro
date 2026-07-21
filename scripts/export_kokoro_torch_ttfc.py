@@ -17,6 +17,105 @@ from onnx import numpy_helper
 BLOCKED_TTFC_OPS = {"NonZero", "ScatterND", "STFT", "Range"}
 
 
+class FixedLengthAwareBiLSTM(torch.nn.Module):
+    """Run a bidirectional LSTM at fixed width without padding contamination."""
+
+    def __init__(self, source: torch.nn.LSTM) -> None:
+        super().__init__()
+        if not source.batch_first or not source.bidirectional or source.num_layers != 1:
+            raise ValueError(
+                "fixed length-aware export requires a one-layer, batch-first "
+                "bidirectional LSTM"
+            )
+        if source.proj_size:
+            raise ValueError("projected LSTMs are not supported")
+
+        options = {
+            "input_size": source.input_size,
+            "hidden_size": source.hidden_size,
+            "num_layers": 1,
+            "bias": source.bias,
+            "batch_first": True,
+            "bidirectional": False,
+        }
+        self.forward_lstm = torch.nn.LSTM(**options)
+        self.backward_lstm = torch.nn.LSTM(**options)
+        parameter = next(source.parameters())
+        self.to(device=parameter.device, dtype=parameter.dtype)
+        self._copy_direction(source, self.forward_lstm, reverse=False)
+        self._copy_direction(source, self.backward_lstm, reverse=True)
+
+    @staticmethod
+    def _copy_direction(
+        source: torch.nn.LSTM,
+        target: torch.nn.LSTM,
+        *,
+        reverse: bool,
+    ) -> None:
+        suffix = "_reverse" if reverse else ""
+        with torch.no_grad():
+            target.weight_ih_l0.copy_(getattr(source, f"weight_ih_l0{suffix}"))
+            target.weight_hh_l0.copy_(getattr(source, f"weight_hh_l0{suffix}"))
+            if source.bias:
+                target.bias_ih_l0.copy_(getattr(source, f"bias_ih_l0{suffix}"))
+                target.bias_hh_l0.copy_(getattr(source, f"bias_hh_l0{suffix}"))
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        lengths: torch.LongTensor | None = None,
+    ) -> tuple[torch.Tensor, None]:
+        batch_size, sequence_length, feature_count = x.shape
+        if lengths is None:
+            lengths = torch.full(
+                (batch_size,),
+                sequence_length,
+                dtype=torch.long,
+                device=x.device,
+            )
+        else:
+            lengths = lengths.to(device=x.device, dtype=torch.long)
+        lengths = torch.clamp(lengths, min=1, max=sequence_length)
+
+        positions = torch.arange(
+            sequence_length,
+            device=x.device,
+            dtype=lengths.dtype,
+        ).unsqueeze(0)
+        valid = positions < lengths.unsqueeze(1)
+        valid_features = valid.unsqueeze(-1)
+        masked_x = x.masked_fill(~valid_features, 0.0)
+
+        self.forward_lstm.flatten_parameters()
+        forward_output, _ = self.forward_lstm(masked_x)
+
+        reverse_indices = lengths.unsqueeze(1) - 1 - positions
+        reverse_indices = torch.clamp(
+            reverse_indices,
+            min=0,
+            max=sequence_length - 1,
+        )
+        reverse_input_indices = reverse_indices.unsqueeze(-1).expand(
+            batch_size,
+            sequence_length,
+            feature_count,
+        )
+        reverse_input = torch.gather(masked_x, 1, reverse_input_indices)
+        reverse_input = reverse_input.masked_fill(~valid_features, 0.0)
+        self.backward_lstm.flatten_parameters()
+        reverse_output, _ = self.backward_lstm(reverse_input)
+        reverse_output_indices = reverse_indices.unsqueeze(-1).expand(
+            batch_size,
+            sequence_length,
+            self.backward_lstm.hidden_size,
+        )
+        backward_output = torch.gather(reverse_output, 1, reverse_output_indices)
+
+        output = torch.cat([forward_output, backward_output], dim=-1)
+        output = output.masked_fill(~valid_features, 0.0)
+        return output, None
+
+
 class KokoroTTFCExportWrapper(torch.nn.Module):
     def __init__(
         self,
@@ -29,6 +128,8 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         output_tail_margin_samples: int = 0,
         output_short_tail_margin_samples: int | None = None,
         output_short_tail_margin_max_tokens: int | None = None,
+        output_medium_tail_margin_samples: int | None = None,
+        output_medium_tail_margin_max_tokens: int | None = None,
         static_alignment: bool = False,
         length_aware: bool = False,
         internal_dtype: torch.dtype = torch.float32,
@@ -43,6 +144,10 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         self.output_tail_margin_samples = output_tail_margin_samples
         self.output_short_tail_margin_samples = output_short_tail_margin_samples
         self.output_short_tail_margin_max_tokens = output_short_tail_margin_max_tokens
+        self.output_medium_tail_margin_samples = output_medium_tail_margin_samples
+        self.output_medium_tail_margin_max_tokens = (
+            output_medium_tail_margin_max_tokens
+        )
         self.static_alignment = static_alignment
         self.length_aware = length_aware
         self.internal_dtype = internal_dtype
@@ -175,21 +280,39 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             dtype=active_samples.dtype,
         )
         active_samples = torch.minimum(active_samples, max_samples)
-        if (
-            self.output_short_tail_margin_samples is not None
-            and self.output_short_tail_margin_max_tokens is not None
-            and input_lengths is not None
-        ):
-            short_margin_adjustment = torch.tensor(
-                self.output_short_tail_margin_samples - self.output_tail_margin_samples,
-                device=waveform.device,
-                dtype=active_samples.dtype,
-            )
-            margin_adjustment = torch.where(
-                input_lengths[0] <= self.output_short_tail_margin_max_tokens,
-                short_margin_adjustment,
-                torch.zeros_like(short_margin_adjustment),
-            )
+        margin_adjustment = torch.zeros_like(active_samples)
+        if input_lengths is not None:
+            if (
+                self.output_medium_tail_margin_samples is not None
+                and self.output_medium_tail_margin_max_tokens is not None
+            ):
+                medium_margin_adjustment = torch.tensor(
+                    self.output_medium_tail_margin_samples
+                    - self.output_tail_margin_samples,
+                    device=waveform.device,
+                    dtype=active_samples.dtype,
+                )
+                margin_adjustment = torch.where(
+                    input_lengths[0] <= self.output_medium_tail_margin_max_tokens,
+                    medium_margin_adjustment,
+                    margin_adjustment,
+                )
+            if (
+                self.output_short_tail_margin_samples is not None
+                and self.output_short_tail_margin_max_tokens is not None
+            ):
+                short_margin_adjustment = torch.tensor(
+                    self.output_short_tail_margin_samples
+                    - self.output_tail_margin_samples,
+                    device=waveform.device,
+                    dtype=active_samples.dtype,
+                )
+                margin_adjustment = torch.where(
+                    input_lengths[0] <= self.output_short_tail_margin_max_tokens,
+                    short_margin_adjustment,
+                    margin_adjustment,
+                )
+        if self.output_tail_margin_samples > 0:
             active_samples = active_samples + margin_adjustment
         if self.output_tail_margin_samples > 0:
             positions = torch.arange(
@@ -253,11 +376,32 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
             dtype=d.dtype,
         ).unsqueeze(0)
         en = d.transpose(-1, -2) @ pred_aln_trg
-        f0_pred, n_pred = self.kmodel.predictor.F0Ntrain(en, s)
+        f0_pred, n_pred = self.run_f0_noise(en, s, pred_dur.sum().reshape(1))
         t_en = self.kmodel.text_encoder(input_ids, input_lengths, text_mask)
         asr = t_en @ pred_aln_trg
         audio = self.run_decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
         return audio, pred_dur
+
+    def run_f0_noise(
+        self,
+        x: torch.FloatTensor,
+        style: torch.FloatTensor,
+        frame_lengths: torch.LongTensor,
+    ) -> tuple[torch.FloatTensor, torch.FloatTensor]:
+        predictor = self.kmodel.predictor
+        if not isinstance(predictor.shared, FixedLengthAwareBiLSTM):
+            return predictor.F0Ntrain(x, style)
+
+        shared, _ = predictor.shared(x.transpose(-1, -2), frame_lengths)
+        f0 = shared.transpose(-1, -2)
+        for block in predictor.F0:
+            f0 = block(f0, style)
+        f0 = predictor.F0_proj(f0)
+        noise = shared.transpose(-1, -2)
+        for block in predictor.N:
+            noise = block(noise, style)
+        noise = predictor.N_proj(noise)
+        return f0.squeeze(1), noise.squeeze(1)
 
     def forward_with_lengths(
         self,
@@ -275,7 +419,11 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         d_en = self.kmodel.bert_encoder(bert_dur).transpose(-1, -2)
         s = ref_s[:, 128:]
         d = self.kmodel.predictor.text_encoder(d_en, s, input_lengths, text_mask)
-        x, _ = self.kmodel.predictor.lstm(d)
+        duration_lstm = self.kmodel.predictor.lstm
+        if isinstance(duration_lstm, FixedLengthAwareBiLSTM):
+            x, _ = duration_lstm(d, input_lengths)
+        else:
+            x, _ = duration_lstm(d)
         duration = self.kmodel.predictor.duration_proj(x)
         duration = torch.sigmoid(duration).sum(axis=-1) / speed
         pred_dur = torch.round(duration).clamp(min=1).long().squeeze()
@@ -286,7 +434,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         )
         pred_aln_trg = self.build_alignment(token_count, pred_dur, d.dtype)
         en = d.transpose(-1, -2) @ pred_aln_trg
-        f0_pred, n_pred = self.kmodel.predictor.F0Ntrain(en, s)
+        f0_pred, n_pred = self.run_f0_noise(en, s, pred_dur.sum().reshape(1))
         t_en = self.kmodel.text_encoder(input_ids, input_lengths, text_mask)
         asr = t_en @ pred_aln_trg
         audio = self.run_decoder(asr, f0_pred, n_pred, ref_s[:, :128]).squeeze()
@@ -365,6 +513,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-tail-margin-samples", type=int, default=0)
     parser.add_argument("--output-short-tail-margin-samples", type=int)
     parser.add_argument("--output-short-tail-margin-max-tokens", type=int)
+    parser.add_argument("--output-medium-tail-margin-samples", type=int)
+    parser.add_argument("--output-medium-tail-margin-max-tokens", type=int)
     parser.add_argument(
         "--precision",
         default="fp32",
@@ -399,7 +549,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--patch-fixed-lstm",
         action="store_true",
-        help="Patch Kokoro text LSTMs to avoid pack_padded_sequence for fixed shapes.",
+        help=(
+            "Patch Kokoro bidirectional LSTMs to avoid pack_padded_sequence "
+            "for fixed shapes."
+        ),
+    )
+    parser.add_argument(
+        "--patch-fixed-lstm-scope",
+        choices=("all", "duration-text", "duration"),
+        default="all",
+        help=(
+            "Select which bidirectional LSTMs respect real sequence lengths. "
+            "The duration predictor is always included."
+        ),
     )
     parser.add_argument(
         "--patch-deterministic-source",
@@ -483,7 +645,7 @@ def main() -> int:
     device = torch.device(args.device)
     kmodel = KModel(**kmodel_kwargs).eval().to(device)
     if args.patch_fixed_lstm:
-        patch_fixed_lstm_for_export(kmodel)
+        patch_fixed_lstm_for_export(kmodel, scope=args.patch_fixed_lstm_scope)
     if args.patch_deterministic_source:
         patch_deterministic_source_for_export(kmodel)
     if args.patch_deterministic_sine_source:
@@ -531,6 +693,10 @@ def main() -> int:
         output_tail_margin_samples=args.output_tail_margin_samples,
         output_short_tail_margin_samples=args.output_short_tail_margin_samples,
         output_short_tail_margin_max_tokens=(args.output_short_tail_margin_max_tokens),
+        output_medium_tail_margin_samples=args.output_medium_tail_margin_samples,
+        output_medium_tail_margin_max_tokens=(
+            args.output_medium_tail_margin_max_tokens
+        ),
         static_alignment=args.static_alignment,
         length_aware=args.length_aware,
         internal_dtype=internal_dtype,
@@ -642,6 +808,48 @@ def validate_export_args(args: argparse.Namespace) -> None:
             raise ValueError("--output-short-tail-margin-max-tokens must be positive")
         if not args.length_aware:
             raise ValueError("adaptive short tail margin requires --length-aware")
+    adaptive_medium_margin_values = (
+        args.output_medium_tail_margin_samples,
+        args.output_medium_tail_margin_max_tokens,
+    )
+    if any(value is not None for value in adaptive_medium_margin_values) and not all(
+        value is not None for value in adaptive_medium_margin_values
+    ):
+        raise ValueError(
+            "adaptive medium tail margin requires both "
+            "--output-medium-tail-margin-samples and "
+            "--output-medium-tail-margin-max-tokens"
+        )
+    if args.output_medium_tail_margin_samples is not None:
+        if args.output_medium_tail_margin_samples < 0:
+            raise ValueError("--output-medium-tail-margin-samples must be non-negative")
+        if args.output_medium_tail_margin_samples > args.output_tail_margin_samples:
+            raise ValueError(
+                "--output-medium-tail-margin-samples cannot exceed "
+                "--output-tail-margin-samples"
+            )
+        if args.output_medium_tail_margin_max_tokens <= 0:
+            raise ValueError("--output-medium-tail-margin-max-tokens must be positive")
+        if not args.length_aware:
+            raise ValueError("adaptive medium tail margin requires --length-aware")
+    if (
+        args.output_short_tail_margin_samples is not None
+        and args.output_medium_tail_margin_samples is not None
+    ):
+        if (
+            args.output_short_tail_margin_samples
+            > args.output_medium_tail_margin_samples
+        ):
+            raise ValueError(
+                "short tail margin cannot exceed adaptive medium tail margin"
+            )
+        if (
+            args.output_short_tail_margin_max_tokens
+            >= args.output_medium_tail_margin_max_tokens
+        ):
+            raise ValueError(
+                "short tail margin token limit must be lower than the medium limit"
+            )
     if args.fixed_alignment_frames is not None and not (
         args.length_aware or args.static_alignment
     ):
@@ -793,6 +1001,8 @@ def set_export_metadata(
         "fastkokoro.native_output_samples": str(native_output_samples),
         "fastkokoro.torch_version": torch.__version__,
     }
+    if args.patch_fixed_lstm:
+        metadata["fastkokoro.fixed_lstm_scope"] = args.patch_fixed_lstm_scope
     optional_values = {
         "fastkokoro.fixed_alignment_frames": args.fixed_alignment_frames,
         "fastkokoro.fixed_output_samples": args.fixed_output_samples,
@@ -803,6 +1013,12 @@ def set_export_metadata(
         ),
         "fastkokoro.output_short_tail_margin_max_tokens": (
             args.output_short_tail_margin_max_tokens
+        ),
+        "fastkokoro.output_medium_tail_margin_samples": (
+            args.output_medium_tail_margin_samples
+        ),
+        "fastkokoro.output_medium_tail_margin_max_tokens": (
+            args.output_medium_tail_margin_max_tokens
         ),
         "fastkokoro.output_fade_samples": args.output_fade_samples,
     }
@@ -846,12 +1062,18 @@ def add_checkout_to_path(path: Path) -> None:
         raise RuntimeError(f"Unable to import kokoro from {path}")
 
 
-def patch_fixed_lstm_for_export(kmodel: torch.nn.Module) -> None:
+def patch_fixed_lstm_for_export(
+    kmodel: torch.nn.Module,
+    *,
+    scope: str = "all",
+) -> None:
     import torch.nn.functional as functional  # noqa: PLC0415
     from kokoro.modules import AdaLayerNorm  # noqa: PLC0415
 
+    if scope not in {"all", "duration-text", "duration"}:
+        raise ValueError(f"Unsupported fixed LSTM patch scope: {scope}")
+
     def text_encoder_forward(self, x, input_lengths, m):
-        del input_lengths
         x = self.embedding(x)
         x = x.transpose(1, 2)
         m = m.unsqueeze(1)
@@ -860,14 +1082,16 @@ def patch_fixed_lstm_for_export(kmodel: torch.nn.Module) -> None:
             x = conv(x)
             x = x.masked_fill(m, 0.0)
         x = x.transpose(1, 2)
-        self.lstm.flatten_parameters()
-        x, _ = self.lstm(x)
+        if isinstance(self.lstm, FixedLengthAwareBiLSTM):
+            x, _ = self.lstm(x, input_lengths)
+        else:
+            self.lstm.flatten_parameters()
+            x, _ = self.lstm(x)
         x = x.transpose(-1, -2)
         x = x.masked_fill(m, 0.0)
         return x
 
     def duration_encoder_forward(self, x, style, text_lengths, m):
-        del text_lengths
         masks = m
         x = x.permute(2, 0, 1)
         style_expanded = style.expand(x.shape[0], x.shape[1], -1)
@@ -882,11 +1106,21 @@ def patch_fixed_lstm_for_export(kmodel: torch.nn.Module) -> None:
                 x = x.masked_fill(masks.unsqueeze(-1).transpose(-1, -2), 0.0)
             else:
                 x = x.transpose(-1, -2)
-                block.flatten_parameters()
-                x, _ = block(x)
+                x, _ = block(x, text_lengths)
                 x = functional.dropout(x, p=self.dropout, training=False)
                 x = x.transpose(-1, -2)
         return x.transpose(-1, -2)
+
+    if scope in {"all", "duration-text"}:
+        kmodel.text_encoder.lstm = FixedLengthAwareBiLSTM(kmodel.text_encoder.lstm)
+    for index, block in enumerate(kmodel.predictor.text_encoder.lstms):
+        if isinstance(block, torch.nn.LSTM):
+            kmodel.predictor.text_encoder.lstms[index] = FixedLengthAwareBiLSTM(
+                block
+            )
+    kmodel.predictor.lstm = FixedLengthAwareBiLSTM(kmodel.predictor.lstm)
+    if scope == "all":
+        kmodel.predictor.shared = FixedLengthAwareBiLSTM(kmodel.predictor.shared)
 
     kmodel.text_encoder.forward = text_encoder_forward.__get__(
         kmodel.text_encoder,

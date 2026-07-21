@@ -454,7 +454,11 @@ class FastKokoro:
             )
             return None
 
-        target_tokens = max(1, (len(token_ids) + 1) // 2)
+        target_tokens = self._duration_recovery_token_limit(
+            len(token_ids),
+            duration_frames=duration_frames,
+            safe_duration_frames=safe_duration_frames,
+        )
         batches = self._split_phonemes_to_token_limit(phonemes, target_tokens)
         if len(batches) <= 1:
             logger.warning(
@@ -486,6 +490,20 @@ class FastKokoro:
             for batch in batches
         ]
         return np.concatenate(parts).astype(np.float32, copy=False)
+
+    @staticmethod
+    def _duration_recovery_token_limit(
+        token_count: int,
+        *,
+        duration_frames: int,
+        safe_duration_frames: int,
+    ) -> int:
+        if token_count <= 1:
+            return 1
+        proportional_limit = (
+            token_count * safe_duration_frames // max(duration_frames, 1)
+        )
+        return min(max(proportional_limit, 1), token_count - 1)
 
     def _runtime_tail_trim_ms(self) -> int:
         if self.settings.runtime_tail_trim_ms != DEFAULT_RUNTIME_TAIL_TRIM_MS:
@@ -537,7 +555,7 @@ class FastKokoro:
         buffers.attention_mask[0, : token_count + 2] = 1
 
         token_input = buffers.token_ids[:, :token_width]
-        style = voice[token_count]
+        style = voice[max(token_count - 1, 0)]
         buffers.speed_float32[0] = speed
 
         if profile.token_input_name == "input_ids":
