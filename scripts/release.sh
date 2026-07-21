@@ -56,14 +56,14 @@ fi
 echo -e "${BLUE}Pulling latest changes from ${BASE_REMOTE}/main...${NC}"
 git pull --ff-only "$BASE_REMOTE" main
 
-CURRENT_VERSION=$(uv run python - <<'PY'
+CURRENT_VERSION=$(uv run --no-sync python - <<'PY'
 import tomllib
 with open("pyproject.toml", "rb") as file:
     print(tomllib.load(file)["project"]["version"])
 PY
 )
 
-uv run python - <<PY
+uv run --no-sync python - <<PY
 from packaging.version import parse as parse_version
 import sys
 
