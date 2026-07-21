@@ -15,7 +15,7 @@ The default checkpoint is `onnx/kokoro-82m-streaming-b96-fp16.onnx`.
 
 Watch a short demo with `fastkokoro`:
 
-https://github.com/user-attachments/assets/b978ad87-59fa-4743-8369-08dbda20c2fc
+https://github.com/user-attachments/assets/86f1bcad-4583-48cc-aa70-59a98de4056b
 
 ## Install
 
