@@ -11,7 +11,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3.11 python3.11-venv ca-certificates \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends python3.11 python3.11-venv build-essential cmake \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
@@ -53,7 +56,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3.11 ca-certificates \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends python3.11 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app /app
