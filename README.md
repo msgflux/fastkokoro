@@ -154,14 +154,11 @@ Final checkpoint measurements on a GTX 1650 (SM75) with CUDA I/O Binding:
 | ---: | ---: | --- | ---: | ---: | ---: |
 | 96 | 1.18.1 | CUDA | 169.04 ms | 169.83 ms | - |
 | 96 | 1.22.0 | TensorRT 10.11 | 118.16 ms | 132.63 ms | 206.96 s |
-| 128 | 1.18.1 | CUDA | 223.97 ms | 409.70 ms | - |
-| 128 | 1.22.0 | TensorRT 10.11 | 156.36 ms | 156.73 ms | 245.57 s |
 
-The TensorRT measurements are cache-hit model calls after five warmups. Each
+The TensorRT measurement is a cache-hit model call after five warmups. The b96
 checkpoint compiled into one TensorRT engine with no CUDA or CPU node fallback.
-The b128 CUDA p90 includes thermal outliers; its stable p50 is the useful
-comparison. Persist `/models/trt-cache` because engines are specific to the
-model, bucket, runtime, and GPU architecture.
+Persist `/models/trt-cache` because engines are specific to the model, bucket,
+runtime, and GPU architecture.
 
 Environment variables:
 
@@ -221,14 +218,13 @@ request latency on the first user request.
 Set `FASTKOKORO_WARMUP_REQUEST=true` to run an in-process startup request through
 the same streaming speech endpoint flow and consume the first chunk.
 
-The b96 checkpoint is the supported default. The b128 checkpoint is available
-when longer continuity matters more than latency. Smaller historical buckets
-remain in the model repository for backward compatibility, but their vocoder
-tail quality does not meet the current release standard.
+The b96 checkpoint is the only supported release checkpoint. Other bucket sizes
+did not pass the multilingual listening tests for vocoder tail quality. Long
+inputs are split automatically using the loaded model's token and duration
+limits.
 
 ```bash
 FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b96-fp16.onnx
-FASTKOKORO_MODEL_FILE=onnx/kokoro-82m-streaming-b128-fp16.onnx
 ```
 
 Bucket size controls both token width and the fixed alignment window. Two token
@@ -243,20 +239,19 @@ before late words land at the tail of a near-full fixed-output window.
 
 | Bucket | Usable tokens | Alignment frames | Output samples | Expected words | TensorRT p50 | Notes |
 | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 96 | 94 | 200 | 104,400 | 14 | 118 ms | Recommended default; margin 8,400 |
-| 128 | 126 | 264 | 143,520 | 18 | 156 ms | Adaptive margin 8,400/16,800 |
+| 96 | 94 | 200 | 104,400 | 14 | 118 ms | Adaptive margin 4,320/8,400 |
 
 The server splits fixed-width ONNX requests by phonemized token count before
 running inference, so a text segment is not sent to a checkpoint with more valid
 tokens than its input width supports. Corrected exports also publish their
 alignment and tail geometry as ONNX metadata. When predicted duration exceeds
 the safe alignment capacity, the server retries smaller phoneme batches instead
-of returning a truncated waveform. The b96 graph masks waveform output to
-predicted duration plus 8,400 samples. The b128 graph uses 8,400 samples for
-inputs up to 64 tokens and 16,800 samples above that threshold. This avoids
-short-utterance vocoder noise while preserving long endings. The exporter
-implements each margin by shifting the fixed mask-position vector into negative
-indices, not by adding the margin to the predicted active-sample count. Set
+of returning a truncated waveform. The b96 graph masks waveform output with a
+4,320-sample margin for inputs up to 32 valid tokens and an 8,400-sample margin
+above that threshold. This avoids short-utterance vocoder noise while preserving
+longer endings. The exporter implements each margin by shifting the fixed
+mask-position vector into negative indices, not by adding the margin to the
+predicted active-sample count. Set
 `FASTKOKORO_RUNTIME_TAIL_TRIM_MS` and `FASTKOKORO_RUNTIME_TAIL_FADE_MS` only if
 you need to override the default final cleanup.
 
@@ -264,8 +259,8 @@ Direct PyTorch measurement shows that Kokoro's decoder tensor contains exactly
 600 audio samples per alignment frame. Listening tests show that the useful
 speech boundary is better modeled by 480 samples per predicted-duration frame;
 keeping all 600 preserves stochastic vocoder output that is heard as tail noise.
-The b96 recipe below uses the listening-tested 480 scale and a shifted
-8,400-sample margin.
+The b96 recipe below uses the listening-tested 480 scale and selects the shifted
+4,320/8,400-sample margin inside the ONNX graph from `input_lengths`.
 
 ```bash
 B=96
@@ -286,12 +281,14 @@ uv run \
     --kokoro-repo demo-output/reexport/hexgrad-kokoro \
     --config "$SNAPSHOT/config.json" \
     --checkpoint "$SNAPSHOT/kokoro-v1_0.pth" \
-    --output "demo-output/reexport/candidates/kokoro-82m-streaming-b${B}-align${ALIGN}-decoder-fp16-frame480-margin8400-foldrecip.onnx" \
+    --output "demo-output/reexport/candidates/kokoro-82m-streaming-b96-align200-decoder-fp16-frame480-margin8400-short4320t32-foldrecip.onnx" \
     --bucket "$B" \
     --fixed-alignment-frames "$ALIGN" \
     --fixed-output-samples "$SAMPLES" \
     --output-samples-per-frame 480 \
     --output-tail-margin-samples "$TAIL_MARGIN" \
+    --output-short-tail-margin-samples 4320 \
+    --output-short-tail-margin-max-tokens 32 \
     --precision decoder-fp16 \
     --opset 17 \
     --legacy-export \
@@ -304,48 +301,7 @@ uv run \
     --device cuda
 ```
 
-The b128 export uses the adaptive short-input margin:
-
-```bash
-B=128
-ALIGN=$((2 * B + 8))
-TAIL_MARGIN=16800
-SAMPLES=$((ALIGN * 480 + TAIL_MARGIN))
-SNAPSHOT="$HOME/.cache/huggingface/hub/models--hexgrad--Kokoro-82M/snapshots/f3ff3571791e39611d31c381e3a41a3af07b4987"
-
-uv run \
-  --with torch==2.5.1 \
-  --with transformers==4.48.3 \
-  --with onnx==1.21.0 \
-  --with numpy==1.26.4 \
-  --with huggingface-hub==0.36.2 \
-  --with loguru==0.7.3 \
-  --with 'misaki[en]==0.9.4' \
-  python scripts/export_kokoro_torch_ttfc.py \
-    --kokoro-repo demo-output/reexport/hexgrad-kokoro \
-    --config "$SNAPSHOT/config.json" \
-    --checkpoint "$SNAPSHOT/kokoro-v1_0.pth" \
-    --output "demo-output/reexport/candidates/kokoro-82m-streaming-b128-align264-decoder-fp16-frame480-margin16800-short8400t64-foldrecip.onnx" \
-    --bucket "$B" \
-    --fixed-alignment-frames "$ALIGN" \
-    --fixed-output-samples "$SAMPLES" \
-    --output-samples-per-frame 480 \
-    --output-tail-margin-samples "$TAIL_MARGIN" \
-    --output-short-tail-margin-samples 8400 \
-    --output-short-tail-margin-max-tokens 64 \
-    --precision decoder-fp16 \
-    --opset 17 \
-    --legacy-export \
-    --length-aware \
-    --patch-fixed-lstm \
-    --patch-scatterless-sine-source \
-    --patch-split-adain \
-    --patch-albert-sdpa-bool-mask-scale \
-    --fold-constant-reciprocals \
-    --device cuda
-```
-
-Post-process either export with standard ONNX operators only:
+Post-process the export with standard ONNX operators only:
 
 ```bash
 uv run --with onnxsim==0.6.5 --with onnx==1.21.0 --with numpy==1.26.4 \
@@ -368,8 +324,7 @@ Published artifact checksums:
 
 | File | Nodes | SHA-256 |
 | --- | ---: | --- |
-| `onnx/kokoro-82m-streaming-b96-fp16.onnx` | 1,692 | `7123fa3ac9b9ed17b378e1b673fa529400e61459e99a61a5d466416523063b6c` |
-| `onnx/kokoro-82m-streaming-b128-fp16.onnx` | 1,696 | `79d655c314a918bad4df6feb849a903f9d9551763171f375046edad92418495a` |
+| `onnx/kokoro-82m-streaming-b96-fp16.onnx` | 1,696 | `7a77a144601a7a37cee060cd26cdab3c6125f61cbcf87ddd0fc0f929c9d67ad8` |
 
 `FASTKOKORO_JIT` is enabled by default for PCM encoding and trim. The first call
 compiles the kernels, so keep startup warmup enabled to absorb this cost before
