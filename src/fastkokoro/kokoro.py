@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -157,6 +158,11 @@ class Tokenizer:
         if not config.lib_path:
             config.lib_path = espeakng_loader.get_library_path()
 
+        self._ja_g2p: Any | None = None
+        self._ja_g2p_lock = threading.Lock()
+        self._zh_g2p: Any | None = None
+        self._zh_g2p_lock = threading.Lock()
+
         env_library = os.getenv("PHONEMIZER_ESPEAK_LIBRARY")
         if env_library:
             config.lib_path = env_library
@@ -192,14 +198,39 @@ class Tokenizer:
     def phonemize(self, text: str, lang: str = "en-us", norm: bool = True) -> str:
         if norm:
             text = self.normalize_text(text)
-        phonemes = phonemizer.phonemize(
-            text,
-            lang,
-            preserve_punctuation=True,
-            with_stress=True,
-        )
+        if lang == "ja":
+            phonemes, _ = self._japanese_g2p()(text)
+        elif lang == "zh":
+            phonemes, _ = self._chinese_g2p()(text)
+        else:
+            phonemes = phonemizer.phonemize(
+                text,
+                lang,
+                preserve_punctuation=True,
+                with_stress=True,
+            )
         phonemes = "".join(symbol for symbol in phonemes if symbol in self.vocab)
         return phonemes.strip()
+
+    def _japanese_g2p(self):
+        if self._ja_g2p is not None:
+            return self._ja_g2p
+        with self._ja_g2p_lock:
+            if self._ja_g2p is None:
+                from misaki_ja_lightning import ja
+
+                self._ja_g2p = ja.JAG2P()
+        return self._ja_g2p
+
+    def _chinese_g2p(self):
+        if self._zh_g2p is not None:
+            return self._zh_g2p
+        with self._zh_g2p_lock:
+            if self._zh_g2p is None:
+                from misaki import zh
+
+                self._zh_g2p = zh.ZHG2P(version=None)
+        return self._zh_g2p
 
 
 class Kokoro:
