@@ -145,9 +145,7 @@ class KokoroTTFCExportWrapper(torch.nn.Module):
         self.output_short_tail_margin_samples = output_short_tail_margin_samples
         self.output_short_tail_margin_max_tokens = output_short_tail_margin_max_tokens
         self.output_medium_tail_margin_samples = output_medium_tail_margin_samples
-        self.output_medium_tail_margin_max_tokens = (
-            output_medium_tail_margin_max_tokens
-        )
+        self.output_medium_tail_margin_max_tokens = output_medium_tail_margin_max_tokens
         self.static_alignment = static_alignment
         self.length_aware = length_aware
         self.internal_dtype = internal_dtype
@@ -1115,9 +1113,7 @@ def patch_fixed_lstm_for_export(
         kmodel.text_encoder.lstm = FixedLengthAwareBiLSTM(kmodel.text_encoder.lstm)
     for index, block in enumerate(kmodel.predictor.text_encoder.lstms):
         if isinstance(block, torch.nn.LSTM):
-            kmodel.predictor.text_encoder.lstms[index] = FixedLengthAwareBiLSTM(
-                block
-            )
+            kmodel.predictor.text_encoder.lstms[index] = FixedLengthAwareBiLSTM(block)
     kmodel.predictor.lstm = FixedLengthAwareBiLSTM(kmodel.predictor.lstm)
     if scope == "all":
         kmodel.predictor.shared = FixedLengthAwareBiLSTM(kmodel.predictor.shared)

@@ -979,16 +979,22 @@ def test_duration_overflow_retries_smaller_phoneme_batches(monkeypatch):
 
 
 def test_duration_recovery_token_limit_scales_with_overflow():
-    assert FastKokoro._duration_recovery_token_limit(
-        79,
-        duration_frames=208,
-        safe_duration_frames=200,
-    ) == 75
-    assert FastKokoro._duration_recovery_token_limit(
-        9,
-        duration_frames=259,
-        safe_duration_frames=258,
-    ) == 8
+    assert (
+        FastKokoro._duration_recovery_token_limit(
+            79,
+            duration_frames=208,
+            safe_duration_frames=200,
+        )
+        == 75
+    )
+    assert (
+        FastKokoro._duration_recovery_token_limit(
+            9,
+            duration_frames=259,
+            safe_duration_frames=258,
+        )
+        == 8
+    )
 
 
 def test_create_samples_with_buffer_pool_grows_and_merges(monkeypatch):
