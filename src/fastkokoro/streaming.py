@@ -6,6 +6,11 @@ from collections.abc import Iterable
 from fastkokoro.config import SAMPLE_RATE
 
 BYTES_PER_PCM_SAMPLE = 2
+INLINE_CONTROL_OR_WORD_PATTERN = re.compile(r"\[[^\]]+\]\([^)]*\)\S*|\S+")
+
+
+def split_text_units(text: str) -> list[str]:
+    return INLINE_CONTROL_OR_WORD_PATTERN.findall(text)
 
 
 def split_sentences(text: str) -> list[str]:
@@ -46,7 +51,7 @@ def split_scheduled_chunks(
     current_chars = 0
     segment_index = 0
 
-    for word in text.split():
+    for word in split_text_units(text):
         segment_max_chars, segment_max_words = _segment_limits(
             segment_index,
             initial_max_chars=initial_max_chars,

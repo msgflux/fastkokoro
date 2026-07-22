@@ -47,6 +47,14 @@ def test_split_chunks_limits_chars_without_punctuation():
     ) == ["primeiro", "segundo", "terceiro"]
 
 
+def test_split_chunks_keeps_inline_pronunciation_control_atomic():
+    assert split_chunks(
+        "one [two words](+1). three",
+        max_chars=80,
+        max_words=1,
+    ) == ["one", "[two words](+1).", "three"]
+
+
 def test_split_scheduled_chunks_grows_segment_size():
     assert split_scheduled_chunks(
         "um dois tres quatro cinco seis sete oito nove dez",
