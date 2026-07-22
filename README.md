@@ -197,6 +197,35 @@ These controls are resolved in the server's text-to-phoneme layer. The ONNX
 model receives only phoneme tokens, so this feature does not require a different
 checkpoint or a model re-export.
 
+## Pauses
+
+Inline pause tokens insert an exact duration of silence without running the
+model for that segment. This request adds a 1.5-second pause between two
+sentences:
+
+```bash
+curl http://localhost:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "kokoro",
+    "input": "The first sentence ends here.[pause:1.5s]The second sentence starts after the pause.",
+    "voice": "af_heart",
+    "lang": "en-us",
+    "response_format": "wav"
+  }' \
+  --output pause.wav
+```
+
+The form is strict: `[pause:1.5s]` uses a colon, a numeric duration in seconds,
+a trailing `s`, and square brackets. Change the numeric value to control the
+duration. Other forms such as `[pause=1.5]` or SSML `<break/>` are treated as
+normal text.
+
+During streaming, explicit `[pause:...]` segments control their own silence and
+do not receive additional `FASTKOKORO_STREAM_BOUNDARY_SILENCE_MS`. Pause tokens
+work with every supported language and voice because the server resolves them
+before text is phonemized or sent to ONNX.
+
 ## OpenAI SDK
 
 Point the OpenAI Python SDK at the local server:
@@ -241,6 +270,24 @@ audio = engine.create(
     response_format="wav",
 )
 ```
+
+## Voices and Languages
+
+The official Kokoro voice list maps voices to language codes. `fastkokoro`
+accepts the Kokoro language code and common locale aliases, then validates that
+the requested voice belongs to the resolved language.
+
+| Language | Request `lang` values | Voices |
+| --- | --- | --- |
+| American English | `a`, `en-us`, `american` | `af_heart`, `af_alloy`, `af_aoede`, `af_bella`, `af_jessica`, `af_kore`, `af_nicole`, `af_nova`, `af_river`, `af_sarah`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_fenrir`, `am_liam`, `am_michael`, `am_onyx`, `am_puck`, `am_santa` |
+| British English | `b`, `en-gb`, `british` | `bf_alice`, `bf_emma`, `bf_isabella`, `bf_lily`, `bm_daniel`, `bm_fable`, `bm_george`, `bm_lewis` |
+| Japanese | `j`, `ja`, `ja-jp` | `jf_alpha`, `jf_gongitsune`, `jf_nezumi`, `jf_tebukuro`, `jm_kumo` |
+| Mandarin Chinese | `z`, `zh`, `zh-cn`, `mandarin` | `zf_xiaobei`, `zf_xiaoni`, `zf_xiaoxiao`, `zf_xiaoyi`, `zm_yunjian`, `zm_yunxi`, `zm_yunxia`, `zm_yunyang` |
+| Spanish | `e`, `es`, `es-es` | `ef_dora`, `em_alex`, `em_santa` |
+| French | `f`, `fr`, `fr-fr` | `ff_siwis` |
+| Hindi | `h`, `hi`, `hi-in` | `hf_alpha`, `hf_beta`, `hm_omega`, `hm_psi` |
+| Italian | `i`, `it`, `it-it` | `if_sara`, `im_nicola` |
+| Brazilian Portuguese | `p`, `pt`, `pt-br` | `pf_dora`, `pm_alex`, `pm_santa` |
 
 ## Docker Details
 
@@ -513,15 +560,9 @@ each generated segment into smaller audio frames controlled by
 keeps a small margin around the non-silent audio detected in each generated
 part so syllable tails are not clipped when segments are concatenated.
 `FASTKOKORO_STREAM_BOUNDARY_SILENCE_MS` can add silence between adjacent
-generated text segments, but defaults to `0`. Explicit `[pause:...]` segments
-control their own silence and do not receive extra boundary silence. Set
-`FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now
-uses the local fastkokoro synthesis path instead of the upstream engine.
-
-Inline pause tokens can be embedded in input text. `[pause:1.5s]` inserts 1.5
-seconds of silence without running the model for that segment. The form is
-strict: colon, numeric seconds, trailing `s`, and square brackets. Other forms
-such as `[pause=1.5]` or SSML `<break/>` are treated as normal text.
+generated text segments, but defaults to `0`. Set
+`FASTKOKORO_STREAM_STRATEGY=kokoro` to keep the legacy strategy name; it now uses
+the local fastkokoro synthesis path instead of the upstream engine.
 
 The default ONNX Runtime thread settings prioritize low CPU latency. Set
 `FASTKOKORO_ONNX_INTRA_OP_NUM_THREADS` or
@@ -608,21 +649,3 @@ For latency tuning, run:
 ```bash
 uv run python scripts/benchmark_latency.py --text short --iterations 5 --warmup
 ```
-
-## Voices and Languages
-
-The official Kokoro voice list maps voices to language codes. `fastkokoro`
-accepts the Kokoro language code and common locale aliases, then validates that
-the requested voice belongs to the resolved language.
-
-| Language | Request `lang` values | Voices |
-| --- | --- | --- |
-| American English | `a`, `en-us`, `american` | `af_heart`, `af_alloy`, `af_aoede`, `af_bella`, `af_jessica`, `af_kore`, `af_nicole`, `af_nova`, `af_river`, `af_sarah`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_fenrir`, `am_liam`, `am_michael`, `am_onyx`, `am_puck`, `am_santa` |
-| British English | `b`, `en-gb`, `british` | `bf_alice`, `bf_emma`, `bf_isabella`, `bf_lily`, `bm_daniel`, `bm_fable`, `bm_george`, `bm_lewis` |
-| Japanese | `j`, `ja`, `ja-jp` | `jf_alpha`, `jf_gongitsune`, `jf_nezumi`, `jf_tebukuro`, `jm_kumo` |
-| Mandarin Chinese | `z`, `zh`, `zh-cn`, `mandarin` | `zf_xiaobei`, `zf_xiaoni`, `zf_xiaoxiao`, `zf_xiaoyi`, `zm_yunjian`, `zm_yunxi`, `zm_yunxia`, `zm_yunyang` |
-| Spanish | `e`, `es`, `es-es` | `ef_dora`, `em_alex`, `em_santa` |
-| French | `f`, `fr`, `fr-fr` | `ff_siwis` |
-| Hindi | `h`, `hi`, `hi-in` | `hf_alpha`, `hf_beta`, `hm_omega`, `hm_psi` |
-| Italian | `i`, `it`, `it-it` | `if_sara`, `im_nicola` |
-| Brazilian Portuguese | `p`, `pt`, `pt-br` | `pf_dora`, `pm_alex`, `pm_santa` |
