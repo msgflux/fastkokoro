@@ -145,6 +145,58 @@ total bytes, time to first speech chunk, and active ONNX Runtime providers.
 The server exposes the local model as `kokoro`. For client compatibility,
 `/v1/audio/speech` also accepts `tts-1` and `gpt-4o-mini-tts` as aliases.
 
+## Pronunciation and Intonation
+
+For `en-us` and `en-gb`, `fastkokoro` supports the inline pronunciation
+controls used by the [upstream Kokoro Space](https://huggingface.co/spaces/hexgrad/Kokoro-TTS).
+This request overrides the pronunciation of `Kokoro` and raises the stress of
+`or`:
+
+```bash
+curl http://localhost:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "kokoro",
+    "input": "Meet [Kokoro](/kˈOkəɹO/). Choose this [or](+2) that.",
+    "voice": "af_heart",
+    "lang": "en-us",
+    "response_format": "wav"
+  }' \
+  --output pronunciation.wav
+```
+
+Override a word or phrase with Markdown link syntax and a phoneme sequence
+between slashes:
+
+```text
+[Kokoro](/kˈOkəɹO/)
+```
+
+The sequence is Kokoro's IPA-inspired phoneme alphabet, not unrestricted
+[IPA](https://en.wikipedia.org/wiki/International_Phonetic_Alphabet). Every
+symbol must exist in the model vocabulary; unsupported custom symbols are
+rejected instead of being silently dropped. Primary stress is `ˈ` and secondary
+stress is `ˌ`.
+
+Numeric modifiers adjust the stress assigned by the English phonemizer:
+
+| Input | Effect |
+| --- | --- |
+| `[word](-1)` | Lower stress by one level |
+| `[word](-2)` | Remove primary and secondary stress |
+| `[word](+1)` | Raise stress by one level |
+| `[word](+2)` | Raise an unstressed word to primary stress |
+
+Raising stress may have no audible effect when a word already has primary
+stress. Punctuation such as `;:,.!?—…"()“”` is also preserved for prosody;
+the result varies by language and voice. Custom phonemes and numeric stress
+modifiers are English-only, while punctuation remains available to every
+supported language.
+
+These controls are resolved in the server's text-to-phoneme layer. The ONNX
+model receives only phoneme tokens, so this feature does not require a different
+checkpoint or a model re-export.
+
 ## OpenAI SDK
 
 Point the OpenAI Python SDK at the local server:

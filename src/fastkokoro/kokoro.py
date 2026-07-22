@@ -5,8 +5,10 @@ import ctypes.util
 import json
 import os
 import platform
+import re
 import sys
 import threading
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,13 @@ from phonemizer.backend.espeak.wrapper import EspeakWrapper
 
 MAX_PHONEME_LENGTH = 510
 SAMPLE_RATE = 24000
+
+INLINE_PHONEME_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]*)\)")
+INLINE_STRESS_PATTERN = re.compile(r"[+-]?(?:\d+|0\.5)")
+ENGLISH_LANGUAGES = frozenset({"en-us", "en-gb"})
+ENGLISH_VOWELS = frozenset("AIOQWYaiuæɑɒɔəɛɜɪʊʌᵻ")
+PRIMARY_STRESS = "ˈ"
+SECONDARY_STRESS = "ˌ"
 
 DEFAULT_VOCAB = {
     ";": 1,
@@ -145,6 +154,34 @@ class EspeakConfig:
     data_path: str | None = None
 
 
+def _restress(phonemes: str, marker: str) -> str:
+    for index, symbol in enumerate(phonemes):
+        if symbol in ENGLISH_VOWELS:
+            return f"{phonemes[:index]}{marker}{phonemes[index:]}"
+    return phonemes
+
+
+def _apply_stress_level(phonemes: str, level: float) -> str:
+    def apply(word: str) -> str:
+        has_primary = PRIMARY_STRESS in word
+        has_secondary = SECONDARY_STRESS in word
+        if level < -1:
+            return word.replace(PRIMARY_STRESS, "").replace(SECONDARY_STRESS, "")
+        if level == -1 or (level in (0, -0.5) and has_primary):
+            return word.replace(SECONDARY_STRESS, "").replace(
+                PRIMARY_STRESS, SECONDARY_STRESS
+            )
+        if level in (0, 0.5, 1) and not has_primary and not has_secondary:
+            return _restress(word, SECONDARY_STRESS)
+        if level >= 1 and not has_primary and has_secondary:
+            return word.replace(SECONDARY_STRESS, PRIMARY_STRESS)
+        if level > 1 and not has_primary and not has_secondary:
+            return _restress(word, PRIMARY_STRESS)
+        return word
+
+    return " ".join(apply(word) for word in phonemes.split(" "))
+
+
 class Tokenizer:
     def __init__(
         self,
@@ -202,15 +239,59 @@ class Tokenizer:
             phonemes, _ = self._japanese_g2p()(text)
         elif lang == "zh":
             phonemes, _ = self._chinese_g2p()(text)
+        elif lang in ENGLISH_LANGUAGES and INLINE_PHONEME_PATTERN.search(text):
+            phonemes = self._phonemize_english_controls(text, lang)
         else:
-            phonemes = phonemizer.phonemize(
-                text,
-                lang,
-                preserve_punctuation=True,
-                with_stress=True,
-            )
+            phonemes = self._phonemize_espeak(text, lang)
         phonemes = "".join(symbol for symbol in phonemes if symbol in self.vocab)
         return phonemes.strip()
+
+    @staticmethod
+    def _phonemize_espeak(text: str, lang: str) -> str:
+        return phonemizer.phonemize(
+            text,
+            lang,
+            preserve_punctuation=True,
+            with_stress=True,
+        )
+
+    def _phonemize_english_controls(self, text: str, lang: str) -> str:
+        parts: list[str] = []
+        last_end = 0
+        for match in INLINE_PHONEME_PATTERN.finditer(text):
+            parts.append(
+                self._phonemize_control_fragment(text[last_end : match.start()], lang)
+            )
+            label, feature = match.groups()
+            if len(feature) > 1 and feature.startswith("/") and feature.endswith("/"):
+                custom_phonemes = unicodedata.normalize("NFD", feature[1:].rstrip("/"))
+                unsupported = sorted(set(custom_phonemes).difference(self.vocab))
+                if unsupported:
+                    symbols = " ".join(repr(symbol) for symbol in unsupported)
+                    raise ValueError(f"Unsupported custom phoneme symbols: {symbols}")
+                parts.append(custom_phonemes)
+            else:
+                label_phonemes = self._phonemize_control_fragment(label, lang)
+                if INLINE_STRESS_PATTERN.fullmatch(feature):
+                    label_phonemes = _apply_stress_level(
+                        label_phonemes,
+                        float(feature),
+                    )
+                parts.append(label_phonemes)
+            last_end = match.end()
+        parts.append(self._phonemize_control_fragment(text[last_end:], lang))
+        return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+    def _phonemize_control_fragment(self, text: str, lang: str) -> str:
+        if not text:
+            return ""
+        stripped = text.strip()
+        if not stripped:
+            return " "
+        phonemes = self._phonemize_espeak(stripped, lang).strip()
+        leading = " " if text[0].isspace() else ""
+        trailing = " " if text[-1].isspace() else ""
+        return f"{leading}{phonemes}{trailing}"
 
     def _japanese_g2p(self):
         if self._ja_g2p is not None:

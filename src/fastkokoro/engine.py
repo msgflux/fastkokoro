@@ -29,6 +29,7 @@ from fastkokoro.streaming import (
     split_phrases,
     split_scheduled_chunks,
     split_sentences,
+    split_text_units,
 )
 from fastkokoro.voices import normalize_language, validate_voice_language
 
@@ -1116,7 +1117,7 @@ class FastKokoro:
 
         batches: list[str] = []
         current = ""
-        for word in text.split():
+        for word in split_text_units(text):
             candidate = word if not current else f"{current} {word}"
             if self._text_token_count(candidate, lang) <= max_tokens:
                 current = candidate
